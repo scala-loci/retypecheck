@@ -69,9 +69,8 @@ class Typer[C <: Context](val c: C) {
   def untypecheck(tree: Tree): Tree =
     c untypecheck
       (selfReferenceFixer transform
-        (typeApplicationCleaner transform
-          (syntheticImplicitParamListCleaner transform
-            fixTypecheck(tree, abortWhenUnfixable = true))))
+        (syntheticImplicitParamListCleaner transform
+          fixTypecheck(tree, abortWhenUnfixable = true)))
 
   /**
    * Un-type-checks the given tree resetting all symbols using the
@@ -116,6 +115,7 @@ class Typer[C <: Context](val c: C) {
     
     Modifiers(flags, mods.privateWithin, mods.annotations)
   }
+
 
   /**
    * Creates an AST representing the given type.
@@ -335,7 +335,9 @@ class Typer[C <: Context](val c: C) {
         if (tree.original != null)
           transform(tree.original)
         else
-          tree
+          createTypeTree(tree.tpe)
+      case DefDef(_, termNames.CONSTRUCTOR, _, _, _, _) =>
+        tree
       case AppliedTypeTree(tpt, args) =>
         internal setPos (
           AppliedTypeTree(
@@ -410,12 +412,20 @@ class Typer[C <: Context](val c: C) {
     }
   }
 
+  private implicit class TermOps(term: TermSymbol) {
+    def getterOrNoSymbol =
+      try term.getter
+      catch { case _: reflect.internal.Symbols#CyclicReference => NoSymbol }
+    def setterOrNoSymbol =
+      try term.setter
+      catch { case _: reflect.internal.Symbols#CyclicReference => NoSymbol }
+  }
 
   private def fixTypecheck(tree: Tree, abortWhenUnfixable: Boolean): Tree = {
     val rhss = (tree collect {
       case valDef @ ValDef(_, _, _, _) if valDef.symbol.isTerm =>
         val term = valDef.symbol.asTerm
-        List(term.getter -> valDef, term.setter -> valDef)
+        List(term.getterOrNoSymbol -> valDef, term.setterOrNoSymbol -> valDef)
     }).flatten.toMap - NoSymbol
 
     object typecheckFixer extends Transformer {
@@ -430,16 +440,16 @@ class Typer[C <: Context](val c: C) {
               val apply = Apply(fun, args)
               internal setType (apply, fun.tpe)
               internal setPos (apply, fun.pos)
-              super.transform(apply)
+              transform(apply)
             case _ =>
-              super.transform(tree)
+              transform(tree)
           }
 
         // fix vars, vals and lazy vals
         case ValDef(_, _, _, _)
             if tree.symbol.isTerm && {
               val term = tree.symbol.asTerm
-              term.getter != NoSymbol &&
+              term.getterOrNoSymbol != NoSymbol &&
                 (term.isLazy || (rhss contains term.getter))
             } =>
           EmptyTree
@@ -542,14 +552,21 @@ class Typer[C <: Context](val c: C) {
               mods.annotations exists { _ equalsStructure annotation }
             }
           val annotations = mods.annotations ++ defAnnotations
-          val newDefDef = DefDef(
-            Modifiers(flags, privateWithin, annotations), name,
-            super.transformTypeDefs(tparams),
-            super.transformValDefss(vparamss),
-            super.transform(tpt),
-            super.transform(rhs))
-          internal setType (newDefDef, defDef.tpe)
-          internal setPos (newDefDef, defDef.pos)
+          if (defDef.symbol.asTerm.privateWithin != NoSymbol ||
+              defAnnotations.nonEmpty ||
+              mods.flags != flags ||
+              tree.symbol.name == TermName("$init$")) {
+            val newDefDef = DefDef(
+              Modifiers(flags, privateWithin, annotations), name,
+              super.transformTypeDefs(tparams),
+              super.transformValDefss(vparamss),
+              super.transform(tpt),
+              super.transform(rhs))
+            internal setType (newDefDef, defDef.tpe)
+            internal setPos (newDefDef, defDef.pos)
+          }
+          else
+            super.transform(tree)
 
         // abort on case class
         case ClassDef(mods, _, _, _)
