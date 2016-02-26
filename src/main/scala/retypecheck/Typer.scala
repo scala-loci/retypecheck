@@ -449,7 +449,7 @@ class Typer[C <: Context](val c: C) {
               internal setPos (apply, fun.pos)
               transform(apply)
             case _ =>
-              transform(tree)
+              super.transform(tree)
           }
 
         // fix vars, vals and lazy vals
