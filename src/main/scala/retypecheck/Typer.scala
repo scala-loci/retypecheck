@@ -685,10 +685,18 @@ class Typer[C <: Context](val c: C) {
 
     def defaultArgDef(defDef: DefDef): Boolean = {
       val nameString = defDef.name.toString
-      defDef.symbol != NoSymbol &&
-      (nameString contains "$default$") &&
-      ((nameString endsWith "$macro") ||
-       (defDef.mods hasFlag (SYNTHETIC | DEFAULTPARAM)))
+      val symbol = defDef.symbol.owner.owner
+
+      val isDefaultArg =
+        (nameString contains "$default$") &&
+        ((nameString endsWith "$macro") ||
+         (defDef.mods hasFlag (SYNTHETIC | DEFAULTPARAM)))
+
+      val isConstructorInsideExpression =
+        (nameString startsWith termNames.CONSTRUCTOR.encodedName.toString) &&
+        !symbol.isClass && !symbol.isModule && !symbol.isModuleClass
+
+      symbol != NoSymbol && isDefaultArg && !isConstructorInsideExpression
     }
 
     val definedDefaultArgs = tree collect {
@@ -968,6 +976,23 @@ class Typer[C <: Context](val c: C) {
             if (mods hasFlag (SYNTHETIC | DEFAULTPARAM)) &&
                (name.toString contains "$default$") =>
           EmptyTree
+
+        case ModuleDef(mods, name, Template(parents, self, body)) =>
+          super.transform(tree) match {
+            case ModuleDef(mods, _, Template(parents, noSelfType,
+                  List() |
+                  List(DefDef(_, termNames.CONSTRUCTOR,
+                    List(), List(List()), _, _))))
+                if (mods hasFlag SYNTHETIC) &&
+                   (parents.isEmpty ||
+                     (parents.size == 1 &&
+                      parents.head.tpe != null &&
+                      parents.head.tpe =:= definitions.AnyRefTpe)) =>
+              EmptyTree
+
+            case tree =>
+              tree
+          }
 
         case _ =>
           super.transform(tree)
