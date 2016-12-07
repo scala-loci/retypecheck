@@ -441,6 +441,15 @@ class Typer[C <: Context](val c: C) {
         else
           tree
 
+      case DefDef(mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt, rhs) =>
+        val defDef = DefDef(
+          transformModifiers(mods), termNames.CONSTRUCTOR,
+          transformTypeDefs(tparams), transformValDefss(vparamss),
+          tpt, transform(rhs))
+        internal setSymbol (defDef, tree.symbol)
+        internal setType (defDef, tree.tpe)
+        internal setPos (defDef, tree.pos)
+
       case ValDef(mods, name, tpt, rhs) =>
         val typeTree = tpt match {
           case tree if mods hasFlag ARTIFACT =>
@@ -828,6 +837,7 @@ class Typer[C <: Context](val c: C) {
           val newValDef = ValDef(
             Modifiers(flags, privateWithin, annotations),
             name, transform(valDef.tpt), transform(valDef.rhs))
+          internal setSymbol (newValDef, defDef.symbol)
           internal setType (newValDef, valDef.tpe)
           internal setPos (newValDef, valDef.pos)
 
@@ -869,10 +879,12 @@ class Typer[C <: Context](val c: C) {
           val newValDef = ValDef(
             Modifiers(flags, privateWithin, annotations),
             valOrDefDef.name, transform(typeTree), transform(assignment))
-          valDef map { valDef =>
+          internal setSymbol (newValDef, valOrDefDef.symbol)
+          valDef foreach { valDef =>
             internal setType (newValDef, valDef.tpe)
             internal setPos (newValDef, valDef.pos)
-          } getOrElse newValDef
+          }
+          newValDef
 
         // fix defs
         case defDef @ DefDef(mods, name, tparams, vparamss, tpt, rhs)
