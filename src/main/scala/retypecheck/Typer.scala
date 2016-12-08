@@ -5,15 +5,14 @@ import scala.collection.mutable
 import scala.reflect.macros.blackbox.Context
 import scala.reflect.macros.TypecheckException
 
-object Typer {
-  def apply[C <: Context](c: C): Typer[c.type] =
-    new Typer[c.type](c)
+object ReTyper {
+  def apply(c: Context) = new ReTyper[c.type](c)
 }
 
 /**
  * heavy wizardry to fight the dark forces of Scala type-checking in macros
  */
-class Typer[C <: Context](val c: C) {
+class ReTyper[+C <: Context](val c: C) {
   import c.universe._
   import Flag._
 
