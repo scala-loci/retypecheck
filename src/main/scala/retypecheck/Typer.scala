@@ -399,11 +399,11 @@ class ReTyper[+C <: Context](val c: C) {
 
   private object definedSymbolMarker extends Transformer {
     override def transform(tree: Tree) = tree match {
-      case TypeDef(_, _, _, _) =>
+      case TypeDef(_, _, _, _) if tree.symbol.isType =>
         internal updateAttachment (tree.symbol, DefinedTypeSymbol)
         super.transform(tree)
 
-      case ClassDef(_, _, _, _) =>
+      case ClassDef(_, _, _, _) if tree.symbol.isClass =>
         internal updateAttachment (tree.symbol, DefinedTypeSymbol)
         super.transform(tree)
 
@@ -494,9 +494,9 @@ class ReTyper[+C <: Context](val c: C) {
   }
 
 
-  private case object CaseClassMarker
-
   private def fixCaseClasses(tree: Tree): Tree = {
+    case object CaseClassMarker
+
     val symbols = mutable.Set.empty[Symbol]
 
     val syntheticMethodNames = Set("apply", "canEqual", "copy", "equals",
@@ -505,7 +505,7 @@ class ReTyper[+C <: Context](val c: C) {
 
     def isSyntheticMethodName(name: TermName) =
       (syntheticMethodNames contains name.toString) ||
-      (name.toString startsWith "copy$")
+      ((name.toString startsWith "copy$") && !(name.toString endsWith "$macro"))
 
     object caseClassFixer extends Transformer {
       def resetCaseImplBody(body: List[Tree]) =
@@ -601,11 +601,11 @@ class ReTyper[+C <: Context](val c: C) {
 
 
   private def selfReferenceFixer = new Transformer {
-    val stack = mutable.Stack.empty[(TypeName, Set[Name])]
+    val stack = mutable.ListBuffer.empty[(TypeName, Set[Name])]
 
     override def transform(tree: Tree) = tree match {
       case implDef: ImplDef =>
-        stack push implDef.name.toTypeName -> (
+        stack prepend implDef.name.toTypeName -> (
           (implDef.impl.parents flatMap { parent =>
             if (parent.symbol.isType)
               parent.symbol.asType.toType.members map { _.name }
@@ -618,7 +618,7 @@ class ReTyper[+C <: Context](val c: C) {
         ).toSet
 
         val tree = super.transform(implDef)
-        stack.pop
+        stack remove 0
         tree
 
       case Select(thisTree @ This(thisName), selectedName) =>
@@ -716,7 +716,9 @@ class ReTyper[+C <: Context](val c: C) {
         case defDef @ DefDef(mods, name, tparams, vparamss, tpt, rhs)
             if defaultArgDef(defDef) =>
           val nameString = name.toString
-          val macroDefDef = DefDef(Modifiers(), TermName(s"$nameString$$macro"),
+          val macroDefDef = DefDef(
+            Modifiers(SYNTHETIC),
+            TermName(s"$nameString$$macro"),
             tparams, vparamss, tpt, rhs)
 
           if (nameString endsWith "$macro") {
@@ -973,7 +975,8 @@ class ReTyper[+C <: Context](val c: C) {
 
         case DefDef(mods, name, _, _, _, _)
             if (mods hasFlag (SYNTHETIC | DEFAULTPARAM)) &&
-               (name.toString contains "$default$") =>
+               (name.toString contains "$default$") &&
+               !(name.toString endsWith "$macro") =>
           EmptyTree
 
         case ModuleDef(mods, name, Template(parents, self, body)) =>
