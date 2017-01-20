@@ -334,7 +334,7 @@ class TyperSpec extends FlatSpec with Matchers {
     o4.v should be (8)
   }
 
-  it should "correctly compile members with default arguments" in {
+  it should "correctly compile default arguments" in {
     val v1 = TyperTester.retyper {
       class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
         def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
@@ -373,8 +373,50 @@ class TyperSpec extends FlatSpec with Matchers {
     o1.v should be (297)
   }
 
+  it should "correctly compile auxiliaries and default arguments" in {
+    val v1 = TyperTester.retyper {
+      class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        def this(i: String, k: Int) = this(i.length, k = k)
+        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          i + j + k + l + m + n + o + p
+      }
+      (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
+    }
 
-  it should "correctly compile nested members with default arguments" in {
+    val v2 = TyperTester.retyperAll {
+      class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        def this(i: String, k: Int) = this(i.length, k = k)
+        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          i + j + k + l + m + n + o + p
+      }
+      (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
+    }
+
+    @TyperTester.retyper object o1 {
+      class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        def this(i: String, k: Int) = this(i.length, k = k)
+        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          i + j + k + l + m + n + o + p
+      }
+      val v = (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
+    }
+
+    @TyperTester.retyperAll object o2 {
+      class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        def this(i: String, k: Int) = this(i.length, k = k)
+        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          i + j + k + l + m + n + o + p
+      }
+      val v = (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
+    }
+
+    v1 should be ((297, 297))
+    v2 should be ((297, 297))
+    o1.v should be ((297, 297))
+    o2.v should be ((297, 297))
+  }
+
+  it should "correctly compile nesting with default arguments" in {
     val v1 = TyperTester.retyper {
       class C {
         class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
@@ -400,7 +442,7 @@ class TyperSpec extends FlatSpec with Matchers {
     @TyperTester.retyper object o1 {
       class C {
         class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
-        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
             i + j + k + l + m + n + o + p
         }
         val v = new C(6, k = 5).a(60, o = 50)
@@ -423,6 +465,61 @@ class TyperSpec extends FlatSpec with Matchers {
     v2 should be (297)
     o1.v should be (297)
     o2.v should be (297)
+  }
+
+  it should "correctly compile nesting with auxiliaries and default arguments" in {
+    val v1 = TyperTester.retyper {
+      class C {
+        class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+          def this(i: String, k: Int) = this(i.length, k = k)
+          def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+            i + j + k + l + m + n + o + p
+        }
+        val v = (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
+      }
+      (new C).v
+    }
+
+    val v2 = TyperTester.retyperAll {
+      class C {
+        class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+          def this(i: String, k: Int) = this(i.length, k = k)
+          def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+            i + j + k + l + m + n + o + p
+        }
+        val v = (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
+      }
+      (new C).v
+    }
+
+    @TyperTester.retyper object o1 {
+      class C {
+        class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+          def this(i: String, k: Int) = this(i.length, k = k)
+          def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+            i + j + k + l + m + n + o + p
+        }
+        val v = (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
+      }
+      val v = (new C).v
+    }
+
+    @TyperTester.retyperAll object o2 {
+      class C {
+        class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+          def this(i: String, k: Int) = this(i.length, k = k)
+          def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+            i + j + k + l + m + n + o + p
+        }
+        val v = (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
+      }
+      val v = (new C).v
+    }
+
+    v1 should be ((297, 297))
+    v2 should be ((297, 297))
+    o1.v should be ((297, 297))
+    o2.v should be ((297, 297))
   }
 
   it should "correctly compile anonymous functions and implicits" in {

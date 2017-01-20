@@ -431,6 +431,8 @@ class ReTyper[+C <: Context](val c: C) {
           (internal attachments tpe.typeSymbol).contains[DefinedTypeSymbol.type]
       }
 
+    val classNesting = mutable.ListBuffer.empty[Symbol]
+
     override def transform(tree: Tree) = tree match {
       case tree: TypeTree =>
         if (tree.original != null)
@@ -439,6 +441,18 @@ class ReTyper[+C <: Context](val c: C) {
           createTypeTree(tree.tpe)
         else
           tree
+
+      case ClassDef(_, _, _, _) if tree.symbol.isClass =>
+        classNesting prepend tree.symbol
+        val classDef = super.transform(tree)
+        classNesting remove 0
+        classDef
+
+      case ModuleDef(_, _, _) if tree.symbol.isModule =>
+        classNesting prepend tree.symbol.asModule.moduleClass
+        val moduleDef = super.transform(tree)
+        classNesting remove 0
+        moduleDef
 
       case DefDef(mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt, rhs) =>
         val defDef = DefDef(
@@ -482,6 +496,18 @@ class ReTyper[+C <: Context](val c: C) {
           transform(fun)
         else
           super.transform(tree)
+
+      case Select(This(_), termNames.CONSTRUCTOR) =>
+        Ident(termNames.CONSTRUCTOR)
+
+      case Select(qualifier @ This(_), name) =>
+        val term =
+          classNesting collectFirst {
+            case symbol if symbol.name == qualifier.symbol.name => symbol
+          } map { symbol =>
+            if (symbol == qualifier.symbol) tree else Ident(name)
+          } getOrElse tree
+        super.transform(term)
 
       case Select(_, _) | Ident(_) | This(_)
           if (tree.tpe != null && isTypeUnderExpansion(tree.tpe)) =>
