@@ -20,11 +20,8 @@ class ReTyper[+C <: Context](val c: C) {
    * Re-type-checks the given tree, i.e., first un-type-checks it and then
    * type-checks it again using [[untypecheck]] and [[typecheck]], respectively.
    */
-  def retypecheck(
-      tree: Tree, removeSyntheticImplicitArgs: Boolean = false): Tree =
-    typecheck(
-      untypecheck(tree, removeSyntheticImplicitArgs),
-      removeSyntheticImplicitArgs)
+  def retypecheck(tree: Tree): Tree =
+    typecheck(untypecheck(tree))
 
   /**
    * Re-type-checks the given tree resetting all symbols using the
@@ -32,11 +29,8 @@ class ReTyper[+C <: Context](val c: C) {
    * then type-checks it again using [[untypecheckAll]] and [[typecheck]],
    * respectively.
    */
-  def retypecheckAll(
-      tree: Tree, removeSyntheticImplicitArgs: Boolean = false): Tree =
-    typecheck(
-      untypecheckAll(tree, removeSyntheticImplicitArgs),
-      removeSyntheticImplicitArgs)
+  def retypecheckAll(tree: Tree): Tree =
+    typecheck(untypecheckAll(tree))
 
   /**
    * Type-checks the given tree. If type-checking fails, aborts the macro
@@ -50,19 +44,8 @@ class ReTyper[+C <: Context](val c: C) {
    * This method tries to restore the AST to its original form, which can be
    * type-checked again.
    */
-  def typecheck(
-      tree: Tree, identifySyntheticImplicitArgs: Boolean = false): Tree =
-    try
-      if (identifySyntheticImplicitArgs)
-        fixTypecheck(
-          (definedSymbolMarker transform
-            (syntheticTreeMarker transform
-              (c typecheck
-                (nonSyntheticTreeMarker transform tree)))))
-      else
-        fixTypecheck(
-          (definedSymbolMarker transform
-            (c typecheck tree)))
+  def typecheck(tree: Tree): Tree =
+    try fixTypecheck(c typecheck tree)
     catch {
       case TypecheckException(pos, msg) =>
         c.abort(pos.asInstanceOf[Position], msg)
@@ -79,21 +62,12 @@ class ReTyper[+C <: Context](val c: C) {
    * This method tries to restore the AST to its original form, which can be
    * type-checked again, or abort the macro expansion if this is not possible.
    */
-  def untypecheck(
-      tree: Tree, removeSyntheticImplicitArgs: Boolean = false): Tree =
-    if (removeSyntheticImplicitArgs)
-      fixUntypecheck(
-        c untypecheck
-          (typeApplicationCleaner transform
-            (syntheticImplicitParamListCleaner transform
-              fixCaseClasses(
-                fixTypecheck(tree)))))
-    else
-      fixUntypecheck(
-        c untypecheck
-          (typeApplicationCleaner transform
-            fixCaseClasses(
-              fixTypecheck(tree))))
+  def untypecheck(tree: Tree): Tree =
+    fixUntypecheck(
+      c untypecheck
+        fixTypesAndSymbols(
+          fixCaseClasses(
+            fixTypecheck(tree))))
 
   /**
    * Un-type-checks the given tree resetting all symbols using the
@@ -107,23 +81,13 @@ class ReTyper[+C <: Context](val c: C) {
    * This method tries to restore the AST to its original form, which can be
    * type-checked again, or abort the macro expansion if this is not possible.
    */
-  def untypecheckAll(
-      tree: Tree, removeSyntheticImplicitArgs: Boolean = false): Tree =
-    if (removeSyntheticImplicitArgs)
-      fixUntypecheck(
-        c resetAllAttrs
-          (selfReferenceFixer transform
-            (typeApplicationCleaner transform
-              (syntheticImplicitParamListCleaner transform
-                fixCaseClasses(
-                  fixTypecheck(tree))))))
-    else
-      fixUntypecheck(
-        c resetAllAttrs
-          (selfReferenceFixer transform
-            (typeApplicationCleaner transform
-              fixCaseClasses(
-                fixTypecheck(tree)))))
+  def untypecheckAll(tree: Tree): Tree =
+    fixUntypecheck(
+      c resetAllAttrs
+        (selfReferenceFixer transform
+          fixTypesAndSymbols(
+            fixCaseClasses(
+              fixTypecheck(tree)))))
 
   /**
    * Cleans the flag set of the given modifiers.
@@ -329,91 +293,18 @@ class ReTyper[+C <: Context](val c: C) {
       Select(expandSymbol(symbol.owner), symbol.name.toTermName)
 
 
-  private case object NonSyntheticTree
-
-  private case object SyntheticTree
-
-  private object nonSyntheticTreeMarker extends Transformer {
-    override def transform(tree: Tree) = tree match {
-      case Apply(_, _) =>
-        internal updateAttachment (tree, NonSyntheticTree)
-        internal removeAttachment[SyntheticTree.type] tree
-        super.transform(tree)
-
-      case _ =>
-        internal removeAttachment[SyntheticTree.type] tree
-        internal removeAttachment[NonSyntheticTree.type] tree
-        super.transform(tree)
+  private def fixTypesAndSymbols(tree: Tree): Tree = {
+    val definedTypeSymbols = tree collect {
+      case tree @ TypeDef(_, _, _, _) if tree.symbol.isType =>
+        tree.symbol
+      case tree @ ClassDef(_, _, _, _) if tree.symbol.isClass =>
+        tree.symbol
+      case tree @ ModuleDef(_, _, _) if tree.symbol.isModule =>
+        tree.symbol.asModule.moduleClass
     }
-  }
 
-  private object syntheticTreeMarker extends Transformer {
-    val processedMethodTrees = mutable.Set.empty[Tree]
+    val classNesting = mutable.ListBuffer.empty[Symbol]
 
-    override def transform(tree: Tree) = tree match {
-      case Apply(fun, _) =>
-        if (!(processedMethodTrees contains tree)) {
-          val hasImplicitParamList =
-            tree.symbol != null &&
-            tree.symbol.isMethod &&
-            (tree.symbol.asMethod.paramLists.lastOption exists {
-              _.headOption exists { _.isImplicit }
-            })
-
-          val isNonSyntheticParamList =
-            (internal attachments tree).contains[NonSyntheticTree.type]
-
-          internal removeAttachment[NonSyntheticTree.type] tree
-
-          if (hasImplicitParamList && !isNonSyntheticParamList) {
-            internal updateAttachment (tree, SyntheticTree)
-            processedMethodTrees += fun
-          }
-        }
-        else
-          processedMethodTrees += fun
-
-        super.transform(tree)
-
-      case _ =>
-        super.transform(tree)
-    }
-  }
-
-
-  private object syntheticImplicitParamListCleaner extends Transformer {
-    override def transform(tree: Tree) = tree match {
-      case Apply(fun, _) =>
-        if ((internal attachments tree).contains[SyntheticTree.type])
-          transform(fun)
-        else
-          super.transform(tree)
-
-      case _ =>
-        super.transform(tree)
-    }
-  }
-
-
-  private case object DefinedTypeSymbol
-
-  private object definedSymbolMarker extends Transformer {
-    override def transform(tree: Tree) = tree match {
-      case TypeDef(_, _, _, _) if tree.symbol.isType =>
-        internal updateAttachment (tree.symbol, DefinedTypeSymbol)
-        super.transform(tree)
-
-      case ClassDef(_, _, _, _) if tree.symbol.isClass =>
-        internal updateAttachment (tree.symbol, DefinedTypeSymbol)
-        super.transform(tree)
-
-      case _ =>
-        super.transform(tree)
-    }
-  }
-
-
-  private object typeApplicationCleaner extends Transformer {
     def prependRootPackage(tree: Tree): Tree = tree match {
       case Ident(name) if tree.symbol.owner == c.mirror.RootClass =>
         Select(Ident(termNames.ROOTPKG), name)
@@ -423,100 +314,98 @@ class ReTyper[+C <: Context](val c: C) {
         tree
     }
 
-    def isTypeUnderExpansion(tpe: Type) =
-      tpe exists {
-        case ThisType(sym) =>
-          sym.name.toString startsWith "$anon"
-        case tpe =>
-          (internal attachments tpe.typeSymbol).contains[DefinedTypeSymbol.type]
-      }
+    def isTypeUnderExpansion(tpe: Type) = tpe exists {
+      definedTypeSymbols contains _.typeSymbol
+    }
 
-    val classNesting = mutable.ListBuffer.empty[Symbol]
-
-    override def transform(tree: Tree) = tree match {
-      case tree: TypeTree =>
-        if (tree.original != null)
-          transform(prependRootPackage(tree.original))
-        else if (tree.tpe != null && isTypeUnderExpansion(tree.tpe))
-          createTypeTree(tree.tpe)
-        else
-          tree
-
-      case ClassDef(_, _, _, _) if tree.symbol.isClass =>
-        classNesting prepend tree.symbol
-        val classDef = super.transform(tree)
-        classNesting remove 0
-        classDef
-
-      case ModuleDef(_, _, _) if tree.symbol.isModule =>
-        classNesting prepend tree.symbol.asModule.moduleClass
-        val moduleDef = super.transform(tree)
-        classNesting remove 0
-        moduleDef
-
-      case DefDef(mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt, rhs) =>
-        val defDef = DefDef(
-          transformModifiers(mods), termNames.CONSTRUCTOR,
-          transformTypeDefs(tparams), transformValDefss(vparamss),
-          tpt, transform(rhs))
-        internal setSymbol (defDef, tree.symbol)
-        internal setType (defDef, tree.tpe)
-        internal setPos (defDef, tree.pos)
-
-      case ValDef(mods, name, tpt, rhs) =>
-        val typeTree = tpt match {
-          case tree if mods hasFlag ARTIFACT =>
+    object typesAndSymbolsFixer extends Transformer {
+      override def transform(tree: Tree) = tree match {
+        case tree: TypeTree =>
+          if (tree.original != null)
+            transform(prependRootPackage(tree.original))
+          else if (tree.tpe != null && isTypeUnderExpansion(tree.tpe))
+            createTypeTree(tree.tpe)
+          else
             tree
-          case tree if mods hasFlag SYNTHETIC =>
-            transform(tree)
-          case tree: TypeTree if tree.original == null && !rhs.isEmpty =>
-            TypeTree()
-          case tree =>
-            transform(tree)
-        }
 
-        val valDef = ValDef(
-          transformModifiers(mods), name, typeTree,
-          transform(rhs))
-        internal setSymbol (valDef, tree.symbol)
-        internal setType (valDef, tree.tpe)
-        internal setPos (valDef, tree.pos)
+        case ClassDef(_, _, _, _) if tree.symbol.isClass =>
+          classNesting prepend tree.symbol
+          val classDef = super.transform(tree)
+          classNesting remove 0
+          classDef
 
-      case TypeApply(fun, targs) =>
-        val hasNonRepresentableType = targs exists { arg =>
-          arg.tpe != null && (arg.tpe exists {
-            case TypeRef(NoPrefix, name, List()) =>
-              name.toString endsWith ".type"
-            case _ =>
-              false
-          })
-        }
+        case ModuleDef(_, _, _) if tree.symbol.isModule =>
+          classNesting prepend tree.symbol.asModule.moduleClass
+          val moduleDef = super.transform(tree)
+          classNesting remove 0
+          moduleDef
 
-        if (hasNonRepresentableType)
-          transform(fun)
-        else
+        case DefDef(mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt, rhs) =>
+          val defDef = DefDef(
+            transformModifiers(mods), termNames.CONSTRUCTOR,
+            transformTypeDefs(tparams), transformValDefss(vparamss),
+            tpt, transform(rhs))
+          internal setSymbol (defDef, tree.symbol)
+          internal setType (defDef, tree.tpe)
+          internal setPos (defDef, tree.pos)
+
+        case ValDef(mods, name, tpt, rhs) =>
+          val typeTree = tpt match {
+            case tree if mods hasFlag ARTIFACT =>
+              tree
+            case tree if mods hasFlag SYNTHETIC =>
+              transform(tree)
+            case tree: TypeTree if tree.original == null && !rhs.isEmpty =>
+              TypeTree()
+            case tree =>
+              transform(tree)
+          }
+
+          val valDef = ValDef(
+            transformModifiers(mods), name, typeTree,
+            transform(rhs))
+          internal setSymbol (valDef, tree.symbol)
+          internal setType (valDef, tree.tpe)
+          internal setPos (valDef, tree.pos)
+
+        case TypeApply(fun, targs) =>
+          val hasNonRepresentableType = targs exists { arg =>
+            arg.tpe != null && (arg.tpe exists {
+              case TypeRef(NoPrefix, name, List()) =>
+                name.toString endsWith ".type"
+              case _ =>
+                false
+            })
+          }
+
+          if (hasNonRepresentableType)
+            transform(fun)
+          else
+            super.transform(tree)
+
+        case Select(This(_), termNames.CONSTRUCTOR) =>
+          Ident(termNames.CONSTRUCTOR)
+
+        case Select(qualifier @ This(_), name) =>
+          val term =
+            classNesting collectFirst {
+              case symbol if symbol.name == qualifier.symbol.name => symbol
+            } map { symbol =>
+              if (symbol == qualifier.symbol) tree else Ident(name)
+            } getOrElse tree
+          super.transform(term)
+
+        case Select(_, _) | Ident(_) | This(_)
+            if (tree.tpe != null && isTypeUnderExpansion(tree.tpe)) =>
+          internal setSymbol (tree, NoSymbol)
           super.transform(tree)
 
-      case Select(This(_), termNames.CONSTRUCTOR) =>
-        Ident(termNames.CONSTRUCTOR)
-
-      case Select(qualifier @ This(_), name) =>
-        val term =
-          classNesting collectFirst {
-            case symbol if symbol.name == qualifier.symbol.name => symbol
-          } map { symbol =>
-            if (symbol == qualifier.symbol) tree else Ident(name)
-          } getOrElse tree
-        super.transform(term)
-
-      case Select(_, _) | Ident(_) | This(_)
-          if (tree.tpe != null && isTypeUnderExpansion(tree.tpe)) =>
-        internal setSymbol (tree, NoSymbol)
-        super.transform(tree)
-
-      case _ =>
-        super.transform(tree)
+        case _ =>
+          super.transform(tree)
+      }
     }
+
+    typesAndSymbolsFixer transform tree
   }
 
 
