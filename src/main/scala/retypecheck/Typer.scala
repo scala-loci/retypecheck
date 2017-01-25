@@ -125,7 +125,12 @@ class ReTyper[+C <: Context](val c: C) {
    * This method attempts to create such an AST, which is persistent across
    * type-checking and un-type-checking.
    */
-  def createTypeTree(tpe: Type): Tree = {
+  def createTypeTree(tpe: Type): Tree =
+    createTypeTree(tpe, Set.empty)
+
+  def createTypeTree(tpe: Type, owners: collection.Set[Symbol]): Tree = {
+    val allOwners = ownerChain(c.internal.enclosingOwner).toSet union owners
+
     def isClass(symbol: Symbol): Boolean =
       symbol.isClass && !symbol.isModule && !symbol.isPackage
 
@@ -133,7 +138,7 @@ class ReTyper[+C <: Context](val c: C) {
       case ThisType(pre) if isClass(pre) =>
         This(pre.asType.name)
 
-      case ThisType(pre) =>
+      case ThisType(pre) if isAccessible(pre, allOwners) =>
         expandSymbol(pre)
 
       case TypeRef(NoPrefix, sym, List()) if sym.isModuleClass =>
@@ -292,6 +297,17 @@ class ReTyper[+C <: Context](val c: C) {
     else
       Select(expandSymbol(symbol.owner), symbol.name.toTermName)
 
+  private def ownerChain(symbol: Symbol): List[Symbol] =
+    if (symbol.owner == NoSymbol)
+      Nil
+    else
+      symbol :: ownerChain(symbol.owner)
+
+  private def isAccessible(symbol: Symbol, currentOwners: Set[Symbol]) =
+    ownerChain(symbol).toSet diff currentOwners forall { symbol =>
+      !symbol.isPrivate && !symbol.isProtected
+    }
+
 
   private def fixTypesAndSymbols(tree: Tree): Tree = {
     val definedTypeSymbols = tree collect {
@@ -303,7 +319,8 @@ class ReTyper[+C <: Context](val c: C) {
         tree.symbol.asModule.moduleClass
     }
 
-    val classNesting = mutable.ListBuffer.empty[Symbol]
+    val classNesting =
+      mutable.ListBuffer(ownerChain(c.internal.enclosingOwner).reverse: _*)
 
     def prependRootPackage(tree: Tree): Tree = tree match {
       case Ident(name) if tree.symbol.owner == c.mirror.RootClass =>
@@ -324,7 +341,7 @@ class ReTyper[+C <: Context](val c: C) {
           if (tree.original != null)
             transform(prependRootPackage(tree.original))
           else if (tree.tpe != null && isTypeUnderExpansion(tree.tpe))
-            createTypeTree(tree.tpe)
+            createTypeTree(tree.tpe, classNesting.toSet)
           else
             tree
 
@@ -386,14 +403,23 @@ class ReTyper[+C <: Context](val c: C) {
         case Select(This(_), termNames.CONSTRUCTOR) =>
           Ident(termNames.CONSTRUCTOR)
 
-        case Select(qualifier @ This(_), name) =>
-          val term =
-            classNesting collectFirst {
-              case symbol if symbol.name == qualifier.symbol.name => symbol
-            } map { symbol =>
-              if (symbol == qualifier.symbol) tree else Ident(name)
-            } getOrElse tree
-          super.transform(term)
+        case Select(qualifier @ This(qual), name) =>
+          val owners = classNesting.toSet
+
+          classNesting collectFirst {
+            case symbol if symbol.name == qualifier.symbol.name => symbol
+          } flatMap { symbol =>
+            if (symbol == qualifier.symbol) None else Some(Ident(name))
+          } getOrElse {
+            if (qual != typeNames.EMPTY &&
+                qualifier.symbol.isModuleClass &&
+                isAccessible(tree.symbol, owners) &&
+                !isTypeUnderExpansion(qualifier.symbol.asType.toType) &&
+                !(owners contains qualifier.symbol))
+              Select(expandSymbol(qualifier.symbol), name)
+            else
+              super.transform(tree)
+          }
 
         case Select(_, _) | Ident(_) | This(_)
             if (tree.tpe != null && isTypeUnderExpansion(tree.tpe)) =>
@@ -494,20 +520,41 @@ class ReTyper[+C <: Context](val c: C) {
     }
 
     object caseClassReferenceFixer extends Transformer {
+      val owners = mutable.Set.empty[Symbol]
+
       def symbolsContains(symbol: Symbol): Boolean =
         symbol != null && symbol != NoSymbol &&
         ((symbols contains symbol) || symbolsContains(symbol.owner))
 
-      override def transform(tree: Tree) = tree match {
-        case _ if (internal attachments tree).contains[CaseClassMarker.type] =>
-          internal removeAttachment[CaseClassMarker.type] tree
-          tree
-        case tree: TypeTree if symbolsContains(tree.symbol) =>
-          createTypeTree(tree.tpe)
-        case _ if symbolsContains(tree.symbol) =>
-          super.transform(internal setSymbol (tree, NoSymbol))
-        case _ =>
-          super.transform(tree)
+      override def transform(tree: Tree) = {
+        val owner = tree match {
+          case ClassDef(_, _, _, _) if tree.symbol.isClass =>
+            Some(tree.symbol)
+          case ModuleDef(_, _, _) if tree.symbol.isModule =>
+            Some(tree.symbol.asModule.moduleClass)
+          case _ =>
+            None
+        }
+
+        owner foreach { owners += _ }
+
+        val result = tree match {
+          case _
+              if (internal attachments tree).contains[CaseClassMarker.type] =>
+            internal removeAttachment[CaseClassMarker.type] tree
+            tree
+          case tree: TypeTree if symbolsContains(tree.symbol) =>
+            createTypeTree(tree.tpe, owners)
+          case _
+              if symbolsContains(tree.symbol) =>
+            super.transform(internal setSymbol (tree, NoSymbol))
+          case _ =>
+            super.transform(tree)
+        }
+
+        owner foreach { owners += _ }
+
+        result
       }
     }
 
