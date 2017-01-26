@@ -368,11 +368,11 @@ class ReTyper[+C <: Context](val c: C) {
 
         case ValDef(mods, name, tpt, rhs) =>
           val typeTree = tpt match {
-            case tree if mods hasFlag ARTIFACT =>
-              tree
-            case tree if mods hasFlag SYNTHETIC =>
-              transform(tree)
-            case tree: TypeTree if tree.original == null && !rhs.isEmpty =>
+            case tree: TypeTree
+              if !(mods hasFlag SYNTHETIC) &&
+                 !(mods hasFlag LAZY) &&
+                 !rhs.isEmpty &&
+                 tree.original == null =>
               TypeTree()
             case tree =>
               transform(tree)
