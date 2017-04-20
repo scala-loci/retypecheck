@@ -13,8 +13,10 @@ val dependencies = libraryDependencies ++= Seq(
   scalaOrganization.value % "scala-reflect" % scalaVersion.value % "provided",
   "org.scalamacros" %% "resetallattrs" % "1.0.0")
 
-val dependenciesTest = libraryDependencies +=
-  "org.scalatest" %% "scalatest" % "3.0.0" % "test"
+val dependenciesTest = libraryDependencies ++= Seq(
+  "com.chuusai" %% "shapeless" % "2.3.2" % "test",
+  "org.scala-lang.modules" %% "scala-async" % "0.9.6" % "test",
+  "org.scalatest" %% "scalatest" % "3.0.1" % "test")
 
 val macroparadise = addCompilerPlugin(
   "org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.patch)
@@ -36,12 +38,12 @@ def projectWithBaseSrc(project: Project) = project settings (
 
 def mainProject(project: Project) = projectWithBaseSrc(project) settings (
   scalaVersion := "2.12.1",
-  crossScalaVersions := Seq("2.11.8", "2.12.1"),
+  crossScalaVersions := Seq("2.11.10", "2.12.1"),
   dependencies)
 
 def testProject(project: Project) = preventPublication(projectWithBaseSrc(project)) settings (
   scalaVersion := "2.12.1",
-  crossScalaVersions := Seq("2.11.6", "2.11.7", "2.11.8", "2.12.0", "2.12.1"),
+  crossScalaVersions := Seq("2.11.6", "2.11.7", "2.11.8", "2.11.9", "2.11.10", "2.12.0", "2.12.1"),
   dependencies,
   dependenciesTest)
 

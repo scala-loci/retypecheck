@@ -40,9 +40,6 @@ class ReTyper[+C <: Context](val c: C) {
    * extractors, lazy values or case classes) in a way that they cannot be
    * type-checked again. The issue is described in
    * [[https://issues.scala-lang.org/browse/SI-5464 SI-5465]].
-   *
-   * This method tries to restore the AST to its original form, which can be
-   * type-checked again.
    */
   def typecheck(tree: Tree): Tree =
     try fixTypecheck(c typecheck tree)
@@ -59,8 +56,8 @@ class ReTyper[+C <: Context](val c: C) {
    * type-checked again. The issue is described in
    * [[https://issues.scala-lang.org/browse/SI-5464 SI-5465]].
    *
-   * This method tries to restore the AST to its original form, which can be
-   * type-checked again, or abort the macro expansion if this is not possible.
+   * This method tries to restore the AST to a form, which can be type-checked
+   * again.
    */
   def untypecheck(tree: Tree): Tree =
     fixUntypecheck(
@@ -78,8 +75,8 @@ class ReTyper[+C <: Context](val c: C) {
    * type-checked again. The issue is described in
    * [[https://issues.scala-lang.org/browse/SI-5464 SI-5465]].
    *
-   * This method tries to restore the AST to its original form, which can be
-   * type-checked again, or abort the macro expansion if this is not possible.
+   * This method tries to restore the AST to a form, which can be type-checked
+   * again.
    */
   def untypecheckAll(tree: Tree): Tree =
     fixUntypecheck(

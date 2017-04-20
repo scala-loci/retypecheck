@@ -30,7 +30,7 @@ of the compiler's desugerings during type-checking.
 2. Add the dependency to your `build.sbt`:
 
    ```scala
-   libraryDependencies += "de.tuda.stg" %% "retypecheck" % "0.1.0"
+   libraryDependencies += "de.tuda.stg" %% "retypecheck" % "0.2.0"
    ```
 
 ### Example Usage

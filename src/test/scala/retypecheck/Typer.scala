@@ -44,8 +44,8 @@ class TyperSpec extends FlatSpec with Matchers {
   }
 
   it should "typecheck getter/setter properties" in {
-    "TyperTester.retyper { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot compile
-     "TyperTester.retyperAll { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot compile
+    "TyperTester.retyper { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot typeCheck
+     "TyperTester.retyperAll { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot typeCheck
     "@TyperTester.retyper class C { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" should compile
     "@TyperTester.retyperAll class C { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" should compile
   }
@@ -359,6 +359,8 @@ class TyperSpec extends FlatSpec with Matchers {
       val v = new C(6, k = 5).a(60, o = 50)
     }
 
+    val o1v = new o1.C(6, k = 5).a(60, o = 50)
+
     @TyperTester.retyperAll object o2 {
       class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
         def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
@@ -367,10 +369,14 @@ class TyperSpec extends FlatSpec with Matchers {
       val v = new C(6, k = 5).a(60, o = 50)
     }
 
+    val o2v = new o2.C(6, k = 5).a(60, o = 50)
+
     v1 should be (297)
     v2 should be (297)
+    o1v should be (297)
+    o2v should be (297)
     o1.v should be (297)
-    o1.v should be (297)
+    o2.v should be (297)
   }
 
   it should "correctly compile auxiliaries and default arguments" in {
@@ -401,6 +407,8 @@ class TyperSpec extends FlatSpec with Matchers {
       val v = (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
     }
 
+    val o1v = (new o1.C(6, k = 5).a(60, o = 50), new o1.C("123456", 5).a(60, o = 50))
+
     @TyperTester.retyperAll object o2 {
       class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
         def this(i: String, k: Int) = this(i.length, k = k)
@@ -410,8 +418,12 @@ class TyperSpec extends FlatSpec with Matchers {
       val v = (new C(6, k = 5).a(60, o = 50), new C("123456", 5).a(60, o = 50))
     }
 
+    val o2v = (new o2.C(6, k = 5).a(60, o = 50), new o2.C("123456", 5).a(60, o = 50))
+
     v1 should be ((297, 297))
     v2 should be ((297, 297))
+    o1v should be ((297, 297))
+    o2v should be ((297, 297))
     o1.v should be ((297, 297))
     o2.v should be ((297, 297))
   }
@@ -450,6 +462,11 @@ class TyperSpec extends FlatSpec with Matchers {
       val v = (new C).v
     }
 
+    val o1v = {
+      val c = new o1.C
+      new c.C(6, k = 5).a(60, o = 50)
+    }
+
     @TyperTester.retyperAll object o2 {
       class C {
         class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
@@ -461,8 +478,15 @@ class TyperSpec extends FlatSpec with Matchers {
       val v = (new C).v
     }
 
+    val o2v = {
+      val c = new o2.C
+      new c.C(6, k = 5).a(60, o = 50)
+    }
+
     v1 should be (297)
     v2 should be (297)
+    o1v should be (297)
+    o2v should be (297)
     o1.v should be (297)
     o2.v should be (297)
   }
@@ -504,6 +528,11 @@ class TyperSpec extends FlatSpec with Matchers {
       val v = (new C).v
     }
 
+    val o1v = {
+      val c = new o1.C
+      (new c.C(6, k = 5).a(60, o = 50), new c.C("123456", 5).a(60, o = 50))
+    }
+
     @TyperTester.retyperAll object o2 {
       class C {
         class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
@@ -516,10 +545,66 @@ class TyperSpec extends FlatSpec with Matchers {
       val v = (new C).v
     }
 
+    val o2v = {
+      val c = new o2.C
+      (new c.C(6, k = 5).a(60, o = 50), new c.C("123456", 5).a(60, o = 50))
+    }
+
     v1 should be ((297, 297))
     v2 should be ((297, 297))
+    o1v should be ((297, 297))
+    o2v should be ((297, 297))
     o1.v should be ((297, 297))
     o2.v should be ((297, 297))
+  }
+
+  it should "correctly compile private default arguments" in {
+    val v1 = TyperTester.retyper {
+      class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        private def double(x: Int) = 2 * x
+        def a(m: Int, n: Int = double(35), o: Int = double(40), p: Int = double(45)) =
+          i + j + k + l + m + n + o + p
+      }
+      new C(6, k = 5).a(60, o = 50)
+    }
+
+    val v2 = TyperTester.retyperAll {
+      class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        private def double(x: Int) = 2 * x
+        def a(m: Int, n: Int = double(35), o: Int = double(40), p: Int = double(45)) =
+          i + j + k + l + m + n + o + p
+      }
+      new C(6, k = 5).a(60, o = 50)
+    }
+
+    @TyperTester.retyper object o1 {
+      class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        private def double(x: Int) = 2 * x
+        def a(m: Int, n: Int = double(35), o: Int = double(40), p: Int = double(45)) =
+          i + j + k + l + m + n + o + p
+      }
+      val v = new C(6, k = 5).a(60, o = 50)
+    }
+
+    val o1v = new o1.C(6, k = 5).a(60, o = 50)
+
+    @TyperTester.retyperAll object o2 {
+      class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        private def double(x: Int) = 2 * x
+        def a(m: Int, n: Int = double(35), o: Int = double(40), p: Int = double(45)) =
+          i + j + k + l + m + n + o + p
+      }
+      val v = new C(6, k = 5).a(60, o = 50)
+    }
+
+    val o2v = new o2.C(6, k = 5).a(60, o = 50)
+
+    v1 should be (297)
+    v2 should be (297)
+    o1v should be (297)
+    o2v should be (297)
+    o1.v should be (297)
+    o2.v should be (297)
   }
 
   it should "correctly compile anonymous functions and implicits" in {
