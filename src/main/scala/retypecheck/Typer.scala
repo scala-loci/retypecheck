@@ -209,13 +209,13 @@ class ReTyper[+C <: Context](val c: C) {
 
               if (!(name endsWith ".type"))
                 Some(TypeDef(
-                  Modifiers(DEFERRED | SYNTHETIC),
+                  mods,
                   TypeName(name),
                   List.empty,
                   expandType(quantified.typeSignature)))
               else if (lo =:= definitions.NothingTpe)
                 Some(ValDef(
-                  Modifiers(DEFERRED),
+                  mods,
                   TermName(name substring (0, name.size - 5)),
                   expandType(hi),
                   EmptyTree))
@@ -406,7 +406,10 @@ class ReTyper[+C <: Context](val c: C) {
           classNesting collectFirst {
             case symbol if symbol.name == qualifier.symbol.name => symbol
           } flatMap { symbol =>
-            if (symbol == qualifier.symbol) None else Some(Ident(name))
+            if (symbol == qualifier.symbol || name == termNames.PACKAGE)
+              None
+            else
+              Some(Ident(name))
           } getOrElse {
             if (qual != typeNames.EMPTY &&
                 qualifier.symbol.isModuleClass &&
