@@ -12,11 +12,13 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
   sealed trait Nil extends List[Nothing]
   case object Nil extends Nil
 
+  def markUsed(v: => Any) = ()
+
   behavior of "Typer for code using Shapeless examples"
 
-  it should "typecheck heterogenous lists" in {
-    import poly._
+  import poly._
 
+  it should "typecheck heterogenous lists" in {
     """TyperTester.retyper {
       object choose extends (Set ~> Option) {
         def apply[T](s : Set[T]) = s.headOption
@@ -86,9 +88,9 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
     }""" should compile
   }
 
-  it should "typecheck zippers for heterogenous lists" in {
-    import syntax.zipper._
+  import syntax.zipper._
 
+  it should "typecheck zippers for heterogenous lists" in {
     """TyperTester.retyper {
       val l = 1 :: "foo" :: 3.0 :: HNil
 
@@ -148,6 +150,8 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
     def csv[N <: Nat](hdrs: Sized[Seq[String], N], rows: Seq[Sized[Seq[String], N]]) =
       row(hdrs) :+ rows.map(row(_))
 
+    markUsed(csv(Sized(""), Seq(Sized(""))))
+
     """TyperTester.retyper {
       val hdrs = Sized("Title", "Author")
       val rows = Seq(
@@ -213,11 +217,11 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
     }""" shouldNot typeCheck
   }
 
+  import syntax.singleton._
+  import record._
+
   it should "correctly compile extensible records" in {
     val v1 = TyperTester.retyper {
-      import syntax.singleton._
-      import record._
-
       val book =
         ("author" ->> "Benjamin Pierce") ::
         ("title"  ->> "Types and Programming Languages") ::
@@ -228,9 +232,6 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
     }
 
     val v2 = TyperTester.retyperAll {
-      import syntax.singleton._
-      import record._
-
       val book =
         ("author" ->> "Benjamin Pierce") ::
         ("title"  ->> "Types and Programming Languages") ::
@@ -241,9 +242,6 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
     }
 
     @TyperTester.retyper object o1 {
-      import syntax.singleton._
-      import record._
-
       val book =
         ("author" ->> "Benjamin Pierce") ::
         ("title"  ->> "Types and Programming Languages") ::
@@ -254,9 +252,6 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
     }
 
     @TyperTester.retyperAll object o2 {
-      import syntax.singleton._
-      import record._
-
       val book =
         ("author" ->> "Benjamin Pierce") ::
         ("title"  ->> "Types and Programming Languages") ::

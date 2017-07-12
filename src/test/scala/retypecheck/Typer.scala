@@ -6,6 +6,8 @@ class TyperSpec extends FlatSpec with Matchers {
   class A(val i: Int)
   case class B(j: Int) extends A(0)
 
+  def markUsed(v: => Any) = ()
+
   behavior of "Typer"
 
   it should "typecheck case classes" in {
@@ -107,7 +109,9 @@ class TyperSpec extends FlatSpec with Matchers {
   it should "typecheck outer locally singleton type parameters" in {
     class A[T]
     implicit val c = { val s = ""; new A[s.type] }
-    def test[T](implicit c: A[T]): A[T] = ???
+    def test[T](implicit c: A[T]): A[T] = { markUsed(c); ??? }
+
+    markUsed(test)
 
     "TyperTester.retyper { val v = test; val w: A[_ <: String with Singleton] = v }" should compile
     "TyperTester.retyperAll { val v = test; val w: A[_ <: String with Singleton] = v }" should compile
@@ -120,7 +124,9 @@ class TyperSpec extends FlatSpec with Matchers {
     class Y
     class Z extends Y
     implicit def c = new Z
-    def test(implicit c: Y): X[c.type] = null
+    def test(implicit c: Y): X[c.type] = { markUsed(c); ??? }
+
+    markUsed(test)
 
     "TyperTester.retyper { val v = test; val w: X[_ <: Z with Singleton] = v }" should compile
     "TyperTester.retyperAll { val v = test; val w: X[_ <: Z with Singleton] = v }" should compile
@@ -168,7 +174,9 @@ class TyperSpec extends FlatSpec with Matchers {
 
   it should "typecheck partially applied functions" in {
     implicit val s = ""
-    def test(x: Float)(c: Char)(implicit s: String): Int = ???
+    def test(x: Float)(c: Char)(implicit s: String): Int = { markUsed(s); ??? }
+
+    markUsed(test(0)('a'))
 
     "TyperTester.retyper { val x = test(0) _; val y = x('a') }" should compile
     "TyperTester.retyperAll { val x = test(0) _; val y = x('a') }" should compile

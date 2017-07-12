@@ -39,7 +39,7 @@ class ReTyper[+C <: Context](val c: C) {
    * The type-checking process distorts certain ASTs (such as representations of
    * extractors, lazy values or case classes) in a way that they cannot be
    * type-checked again. The issue is described in
-   * [[https://issues.scala-lang.org/browse/SI-5464 SI-5465]].
+   * [[https://issues.scala-lang.org/browse/SI-5464 SI-5464]].
    */
   def typecheck(tree: Tree): Tree =
     try fixTypecheck(c typecheck tree)
@@ -54,7 +54,7 @@ class ReTyper[+C <: Context](val c: C) {
    * The type-checking process distorts certain ASTs (such as representations of
    * extractors, lazy values or case classes) in a way that they cannot be
    * type-checked again. The issue is described in
-   * [[https://issues.scala-lang.org/browse/SI-5464 SI-5465]].
+   * [[https://issues.scala-lang.org/browse/SI-5464 SI-5464]].
    *
    * This method tries to restore the AST to a form, which can be type-checked
    * again.
@@ -73,7 +73,7 @@ class ReTyper[+C <: Context](val c: C) {
    * The type-checking process distorts certain ASTs (such as representations of
    * extractors, lazy values or case classes) in a way that they cannot be
    * type-checked again. The issue is described in
-   * [[https://issues.scala-lang.org/browse/SI-5464 SI-5465]].
+   * [[https://issues.scala-lang.org/browse/SI-5464 SI-5464]].
    *
    * This method tries to restore the AST to a form, which can be type-checked
    * again.

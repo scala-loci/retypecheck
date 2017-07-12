@@ -2,7 +2,7 @@
 
 The Scala type-checking process distorts certain ASTs (such as representations
 of extractors or case classes) in a way that they cannot be type-checked again.
-The issue is described in [SI-5465](http://issues.scala-lang.org/browse/SI-5464).
+The issue is described in [SI-5464](http://issues.scala-lang.org/browse/SI-5464).
 Ideally, it should be possible to 1) type-check an AST, 2) transform the AST and
 3) re-type-check the transformed AST. This does not work for all ASTs using the
 `typecheck` and `untypecheck` methods provided by the Scala reflection library.
