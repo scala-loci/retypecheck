@@ -24,13 +24,13 @@ of the compiler's desugerings during type-checking.
 1. Add the resolver to your `build.sbt`:
 
    ```scala
-   resolvers += Resolver.bintrayRepo("pweisenburger", "maven")
+   resolvers += Resolver.bintrayRepo("stg-tud", "maven")
    ```
    
 2. Add the dependency to your `build.sbt`:
 
    ```scala
-   libraryDependencies += "de.tuda.stg" %% "retypecheck" % "0.2.0"
+   libraryDependencies += "de.tuda.stg" %% "retypecheck" % "0.4.0"
    ```
 
 ### Example Usage
