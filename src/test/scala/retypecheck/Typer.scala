@@ -1,6 +1,11 @@
 package retypecheck
 
 import org.scalatest._
+import globalObject._
+
+object globalObject {
+  def globalValue = 3
+}
 
 class TyperSpec extends FlatSpec with Matchers {
   class A(val i: Int)
@@ -192,6 +197,31 @@ class TyperSpec extends FlatSpec with Matchers {
     "TyperTester.retyperAll { val x: Char = test(0) _ }" shouldNot typeCheck
     "@TyperTester.retyper class C { val x: Char = test(0) _ }" shouldNot typeCheck
     "@TyperTester.retyperAll class C { val x: Char = test(0) _ }" shouldNot typeCheck
+  }
+
+  it should "typecheck implicit in package of same name as current package" in {
+    def test0(implicit d: retypecheck.DummyClass) = { markUsed(d); ??? }
+    def test1(implicit d: retypecheck.retypecheck.DummyClass) = { markUsed(d); ??? }
+
+    markUsed(test0)
+    markUsed(test1)
+
+    "TyperTester.retyper { test0 }" should compile
+    "TyperTester.retyperAll { test0 }" should compile
+    "@TyperTester.retyper class C { test0 }" should compile
+    "@TyperTester.retyperAll class C { test0 }" should compile
+
+    "TyperTester.retyper { test1 }" should compile
+    "TyperTester.retyperAll { test1 }" should compile
+    "@TyperTester.retyper class C { test1 }" should compile
+    "@TyperTester.retyperAll class C { test1 }" should compile
+  }
+
+  it should "typecheck global object access with local method of same name" in {
+    "TyperTester.retyper { def globalObject = 0; globalValue }" should compile
+    "TyperTester.retyperAll { def globalObject = 0; globalValue }" should compile
+    "@TyperTester.retyper class C { def globalObject = 0; globalValue }" should compile
+    "@TyperTester.retyperAll class C { def globalObject = 0; globalValue }" should compile
   }
 
   it should "correctly compile case classes and objects in function literals" in {

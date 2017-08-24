@@ -289,7 +289,11 @@ class ReTyper[+C <: Context](val c: C) {
   private def expandSymbol(symbol: Symbol): Tree =
     if (symbol == c.mirror.RootClass)
       Ident(termNames.ROOTPKG)
-    else if (symbol.owner == NoSymbol)
+    else if (!symbol.owner.isClass &&
+             !symbol.owner.isModule &&
+             !symbol.owner.isModuleClass &&
+             !symbol.owner.isPackage &&
+             !symbol.owner.isPackageClass)
       Ident(symbol.name.toTermName)
     else
       Select(expandSymbol(symbol.owner), symbol.name.toTermName)
@@ -403,14 +407,16 @@ class ReTyper[+C <: Context](val c: C) {
         case Select(qualifier @ This(qual), name) =>
           val owners = classNesting.toSet
 
-          classNesting collectFirst {
-            case symbol if symbol.name == qualifier.symbol.name => symbol
-          } flatMap { symbol =>
-            if (symbol == qualifier.symbol || name == termNames.PACKAGE)
-              None
+          val fixedEnclosingSelfReference =
+            if (!qualifier.symbol.isModuleClass)
+              classNesting collectFirst {
+                case symbol if symbol.name == qualifier.symbol.name =>
+                  Ident(name)
+              }
             else
-              Some(Ident(name))
-          } getOrElse {
+              None
+
+          fixedEnclosingSelfReference getOrElse {
             if (qual != typeNames.EMPTY &&
                 qualifier.symbol.isModuleClass &&
                 isAccessible(tree.symbol, owners) &&
@@ -635,14 +641,6 @@ class ReTyper[+C <: Context](val c: C) {
         List(term.getterOrNoSymbol -> valDef, term.setterOrNoSymbol -> valDef)
     }).flatten.toMap - NoSymbol
 
-    def inScalaPackage(symbol: Symbol): Boolean =
-      symbol != NoSymbol &&
-      symbol != c.mirror.RootClass &&
-      ((symbol.name.toString == "scala" &&
-        symbol.owner == c.mirror.RootClass) ||
-       inScalaPackage(symbol.owner))
-
-    val expandingInScalaPackage = inScalaPackage(c.internal.enclosingOwner)
 
     def defaultArgDef(defDef: DefDef): Boolean = {
       val nameString = defDef.name.toString
@@ -738,14 +736,10 @@ class ReTyper[+C <: Context](val c: C) {
             else TermName(s"${name.toString}$$macro")
           super.transform(Select(qualifier, macroName))
 
-        // fix names for compiler-generated values from the scala package
         case Ident(_) if tree.symbol.isTerm =>
-          if (inScalaPackage(tree.symbol) && !expandingInScalaPackage)
-            internal setSymbol (
-              internal setType (expandSymbol(tree.symbol), tree.tpe),
-              tree.symbol)
-          else
-            tree
+          internal setSymbol (
+            internal setType (expandSymbol(tree.symbol), tree.tpe),
+            tree.symbol)
 
         // fix renamed imports
         case Select(qual, _) if tree.symbol != NoSymbol =>
