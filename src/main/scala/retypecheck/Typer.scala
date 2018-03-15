@@ -122,10 +122,11 @@ class ReTyper[+C <: Context](val c: C) {
    * This method attempts to create such an AST, which is persistent across
    * type-checking and un-type-checking.
    */
-  def createTypeTree(tpe: Type): Tree =
-    createTypeTree(tpe, Set.empty)
+  def createTypeTree(tpe: Type, pos: Position): Tree =
+    createTypeTree(tpe, pos, Set.empty)
 
-  def createTypeTree(tpe: Type, owners: collection.Set[Symbol]): Tree = {
+  def createTypeTree(tpe: Type, pos: Position,
+      owners: collection.Set[Symbol]): Tree = {
     val allOwners = ownerChain(c.internal.enclosingOwner).toSet union owners
 
     def isClass(symbol: Symbol): Boolean =
@@ -136,7 +137,7 @@ class ReTyper[+C <: Context](val c: C) {
         This(pre.asType.name)
 
       case ThisType(pre) if isAccessible(pre, allOwners) =>
-        expandSymbol(pre)
+        expandSymbol(pre, pos)
 
       case TypeRef(NoPrefix, sym, List()) if sym.isModuleClass =>
         SingletonTypeTree(Ident(sym.name.toTypeName))
@@ -286,17 +287,20 @@ class ReTyper[+C <: Context](val c: C) {
   }
 
 
-  private def expandSymbol(symbol: Symbol): Tree =
-    if (symbol == c.mirror.RootClass)
-      Ident(termNames.ROOTPKG)
-    else if (!symbol.owner.isClass &&
-             !symbol.owner.isModule &&
-             !symbol.owner.isModuleClass &&
-             !symbol.owner.isPackage &&
-             !symbol.owner.isPackageClass)
-      Ident(symbol.name.toTermName)
-    else
-      Select(expandSymbol(symbol.owner), symbol.name.toTermName)
+  private def expandSymbol(symbol: Symbol, pos: Position): Tree = {
+    val tree =
+      if (symbol == c.mirror.RootClass)
+        Ident(termNames.ROOTPKG)
+      else if (!symbol.owner.isClass &&
+               !symbol.owner.isModule &&
+               !symbol.owner.isModuleClass &&
+               !symbol.owner.isPackage &&
+               !symbol.owner.isPackageClass)
+        Ident(symbol.name.toTermName)
+      else
+        Select(expandSymbol(symbol.owner, pos), symbol.name.toTermName)
+    internal setPos (tree, pos)
+  }
 
   private def ownerChain(symbol: Symbol): List[Symbol] =
     if (symbol.owner == NoSymbol)
@@ -342,7 +346,7 @@ class ReTyper[+C <: Context](val c: C) {
           if (tree.original != null)
             transform(prependRootPackage(tree.original))
           else if (tree.tpe != null && isTypeUnderExpansion(tree.tpe))
-            createTypeTree(tree.tpe, classNesting.toSet)
+            createTypeTree(tree.tpe, tree.pos, classNesting.toSet)
           else
             tree
 
@@ -422,7 +426,7 @@ class ReTyper[+C <: Context](val c: C) {
                 isAccessible(tree.symbol, owners) &&
                 !isTypeUnderExpansion(qualifier.symbol.asType.toType) &&
                 !(owners contains qualifier.symbol))
-              Select(expandSymbol(qualifier.symbol), name)
+              Select(expandSymbol(qualifier.symbol, qualifier.pos), name)
             else
               super.transform(tree)
           }
@@ -550,7 +554,7 @@ class ReTyper[+C <: Context](val c: C) {
             internal removeAttachment[CaseClassMarker.type] tree
             tree
           case tree: TypeTree if symbolsContains(tree.symbol) =>
-            createTypeTree(tree.tpe, owners)
+            createTypeTree(tree.tpe, tree.pos, owners)
           case _
               if symbolsContains(tree.symbol) =>
             super.transform(internal setSymbol (tree, NoSymbol))
@@ -738,7 +742,7 @@ class ReTyper[+C <: Context](val c: C) {
 
         case Ident(_) if tree.symbol.isTerm =>
           internal setSymbol (
-            internal setType (expandSymbol(tree.symbol), tree.tpe),
+            internal setType (expandSymbol(tree.symbol, tree.pos), tree.tpe),
             tree.symbol)
 
         // fix renamed imports
