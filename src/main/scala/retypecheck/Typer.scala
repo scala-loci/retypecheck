@@ -716,6 +716,31 @@ class ReTyper[+C <: Context](val c: C) {
     }
 
     object typecheckFixer extends Transformer {
+      def fixModifiers(mods: Modifiers, symbol: Symbol,
+          annotations: List[Annotation] = List.empty): Modifiers = {
+        val flags = cleanModifiers(mods).flags
+
+        val privateWithin =
+          if (symbol.privateWithin != NoSymbol)
+            symbol.privateWithin.name
+          else
+            mods.privateWithin
+
+        val allAnnotations =
+          (mods.annotations ++
+           (symbol.annotations map { _.tree }) ++
+           (annotations map { _.tree }))
+            .foldLeft(List.empty[Tree]) { (all, tree) =>
+              val transformedTree = transform(tree)
+              if (all exists { _ equalsStructure transformedTree })
+                all
+              else
+                transformedTree :: all
+            }.reverse
+
+        Modifiers(flags, privateWithin, allAnnotations)
+      }
+
       override def transform(tree: Tree) = tree match {
         case tree: TypeTree =>
           if (tree.original != null)
@@ -782,29 +807,13 @@ class ReTyper[+C <: Context](val c: C) {
               !term.isLazy && term.isGetter && (rhss contains term)
             } =>
           val valDef = rhss(tree.symbol)
-          val flags = cleanModifiers(mods).flags |
-            (if (valDef.symbol.asTerm.isVar) MUTABLE else NoFlags)
-          val privateWithin =
-            if (defDef.symbol.asTerm.privateWithin != NoSymbol)
-              defDef.symbol.asTerm.privateWithin.name
-            else
-              mods.privateWithin
-          val defAnnotations =
-            defDef.symbol.annotations map {
-              annotation => transform(annotation.tree)
-            } filterNot { annotation =>
-              mods.annotations exists { _ equalsStructure annotation }
-            }
-          val valAnnotations =
-            rhss(tree.symbol).symbol.annotations map {
-              annotation => transform(annotation.tree)
-            } filterNot { annotation =>
-              (mods.annotations exists { _ equalsStructure annotation }) ||
-              (defAnnotations exists { _ equalsStructure annotation })
-            }
-          val annotations = mods.annotations ++ defAnnotations ++ valAnnotations
+          val valAnnotations = rhss(tree.symbol).symbol.annotations
+          val newMods = Modifiers(
+            mods.flags | (if (valDef.symbol.asTerm.isVar) MUTABLE else NoFlags),
+            mods.privateWithin,
+            mods.annotations)
           val newValDef = ValDef(
-            Modifiers(flags, privateWithin, annotations),
+            fixModifiers(newMods, defDef.symbol, valAnnotations),
             name, transform(valDef.tpt), transform(valDef.rhs))
           internal setSymbol (newValDef, defDef.symbol)
           internal setType (newValDef, valDef.tpe)
@@ -817,36 +826,18 @@ class ReTyper[+C <: Context](val c: C) {
               term.isLazy && term.isGetter
             } =>
           val mods = valOrDefDef.mods
-          val assignment = valOrDefDef.rhs collect {
-            case Assign(_, rhs) => rhs
+          val (lazyValAnnotations, assignment) = valOrDefDef.rhs collect {
+            case Assign(lhs, rhs) => lhs.symbol.annotations -> rhs
           } match {
-            case rhs :: _ => rhs
-            case _ => valOrDefDef.rhs
+            case (annotations, rhs) :: _ => annotations -> rhs
+            case _ => List.empty -> valOrDefDef.rhs
           }
           val valDef = rhss get tree.symbol
           val typeTree = valDef map { _.tpt } getOrElse valOrDefDef.tpt
-          val flags = cleanModifiers(mods).flags
-          val privateWithin =
-            if (valOrDefDef.symbol.asTerm.privateWithin != NoSymbol)
-              valOrDefDef.symbol.asTerm.privateWithin.name
-            else
-              mods.privateWithin
-          val defAnnotations =
-            valOrDefDef.symbol.annotations map {
-              annotation => transform(annotation.tree)
-            } filterNot { annotation =>
-              mods.annotations exists { _ equalsStructure annotation }
-            }
-          val valAnnotations =
-            (rhss get tree.symbol).toList flatMap { _.symbol.annotations } map {
-              annotation => transform(annotation.tree)
-            } filterNot { annotation =>
-              (mods.annotations exists { _ equalsStructure annotation }) ||
-              (defAnnotations exists { _ equalsStructure annotation })
-            }
-          val annotations = mods.annotations ++ defAnnotations ++ valAnnotations
+          val valAnnotations = lazyValAnnotations ++ 
+            (valDef.toList flatMap { _.symbol.annotations })
           val newValDef = ValDef(
-            Modifiers(flags, privateWithin, annotations),
+            fixModifiers(mods, valOrDefDef.symbol, valAnnotations),
             valOrDefDef.name, transform(typeTree), transform(assignment))
           internal setSymbol (newValDef, valOrDefDef.symbol)
           valDef foreach { valDef =>
@@ -855,24 +846,22 @@ class ReTyper[+C <: Context](val c: C) {
           }
           newValDef
 
+        // fix vals
+        case valDef @ ValDef(mods, name, tpt, rhs)
+            if tree.symbol.isTerm =>
+          val newValDef = ValDef(
+            fixModifiers(mods, valDef.symbol), name,
+            transform(tpt),
+            transform(rhs))
+          internal setSymbol (newValDef, valDef.symbol)
+          internal setType (newValDef, valDef.tpe)
+          internal setPos (newValDef, valDef.pos)
+
         // fix defs
         case defDef @ DefDef(mods, name, tparams, vparamss, tpt, rhs)
             if tree.symbol.isTerm =>
-          val flags = cleanModifiers(mods).flags
-          val privateWithin =
-            if (defDef.symbol.asTerm.privateWithin != NoSymbol)
-              defDef.symbol.asTerm.privateWithin.name
-            else
-              mods.privateWithin
-          val defAnnotations =
-            defDef.symbol.annotations map {
-              annotation => transform(annotation.tree)
-            } filterNot { annotation =>
-              mods.annotations exists { _ equalsStructure annotation }
-            }
-          val annotations = mods.annotations ++ defAnnotations
           val newDefDef = DefDef(
-            Modifiers(flags, privateWithin, annotations), name,
+            fixModifiers(mods, defDef.symbol), name,
             transformTypeDefs(tparams),
             transformValDefss(vparamss),
             transform(tpt),
@@ -883,6 +872,38 @@ class ReTyper[+C <: Context](val c: C) {
             internal setSymbol (newDefDef, defDef.symbol)
           else
             newDefDef
+
+        // fix classes
+        case classDef @ ClassDef(mods, name, tparams, impl)
+            if tree.symbol.isClass =>
+          val newClassDef = ClassDef(
+            fixModifiers(mods, classDef.symbol), name,
+            transformTypeDefs(tparams),
+            transformTemplate(impl))
+          internal setSymbol (newClassDef, classDef.symbol)
+          internal setType (newClassDef, classDef.tpe)
+          internal setPos (newClassDef, classDef.pos)
+
+        // fix objects
+        case moduleDef @ ModuleDef(mods, name, impl)
+            if tree.symbol.isModule =>
+          val newModuleDef = ModuleDef(
+            fixModifiers(mods, moduleDef.symbol), name,
+            transformTemplate(impl))
+          internal setSymbol (newModuleDef, moduleDef.symbol)
+          internal setType (newModuleDef, moduleDef.tpe)
+          internal setPos (newModuleDef, moduleDef.pos)
+
+        // fix type definitions
+        case typeDef @ TypeDef(mods, name, tparams, rhs)
+            if tree.symbol.isType =>
+          val newTypeDef = TypeDef(
+            fixModifiers(mods, typeDef.symbol), name,
+            transformTypeDefs(tparams),
+            transform(rhs))
+          internal setSymbol (newTypeDef, typeDef.symbol)
+          internal setType (newTypeDef, typeDef.tpe)
+          internal setPos (newTypeDef, typeDef.pos)
 
         case _ =>
           super.transform(tree)
