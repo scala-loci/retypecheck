@@ -804,12 +804,13 @@ class ReTyper[+C <: Context](val c: C) {
         case defDef @ DefDef(mods, name, _, _, tpt, _)
             if tree.symbol.isTerm && {
               val term = tree.symbol.asTerm
-              !term.isLazy && term.isGetter && (rhss contains term)
+              !term.isLazy && term.isGetter
             } =>
-          val valDef = rhss(tree.symbol)
-          val valAnnotations = rhss(tree.symbol).symbol.annotations
+          val valDef = rhss get tree.symbol getOrElse defDef
+          val valAnnotations = (rhss get tree.symbol).toList flatMap {
+            _.symbol.annotations }
           val newMods = Modifiers(
-            mods.flags | (if (valDef.symbol.asTerm.isVar) MUTABLE else NoFlags),
+            mods.flags | (if (!valDef.symbol.asTerm.isStable) MUTABLE else NoFlags),
             mods.privateWithin,
             mods.annotations)
           val newValDef = ValDef(

@@ -224,6 +224,17 @@ class TyperSpec extends FlatSpec with Matchers {
     "@TyperTester.retyperAll class C { def globalObject = 0; globalValue }" should compile
   }
 
+  it should "typecheck stable path with abstract value" in {
+    trait WithTypeMember { type U }
+
+    markUsed(new WithTypeMember { })
+
+    "TyperTester.retyper { trait T { val v: WithTypeMember; type V <: v.U } }" should compile
+    "TyperTester.retyperAll { trait T { val v: WithTypeMember; type V <: v.U } }" should compile
+    "@TyperTester.retyper trait T { val v: WithTypeMember; type V <: v.U }" should compile
+    "@TyperTester.retyperAll trait T { val v: WithTypeMember; type V <: v.U }" should compile
+  }
+
   it should "correctly compile case classes and objects in function literals" in {
     val v1 = TyperTester.retyper {
       val v = { argument: Int =>
