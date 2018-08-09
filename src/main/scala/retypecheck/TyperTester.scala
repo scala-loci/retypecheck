@@ -5,6 +5,9 @@ import scala.reflect.macros.blackbox.Context
 import scala.language.experimental.macros
 
 object TyperTester {
+  def createTypeTree[T]: String = macro createTypeTreeImpl[T]
+
+
   def retyper[T](code: T): T = macro retyperImpl[T]
 
   def retyperAll[T](code: T): T = macro retyperAllImpl[T]
@@ -55,6 +58,19 @@ object TyperTester {
       c.Expr[Any](result)
     else
       c.Expr[Any](q"$result; ${companion.head}")
+  }
+
+
+  def createTypeTreeImpl[T: c.WeakTypeTag](c: Context): c.Expr[String] = {
+    import c.universe._
+    val t = c.retyper
+    val tree = t createTypeTree (weakTypeOf[T], NoPosition)
+    val fullyCreated = tree forAll {
+      case _: TypeTree => false
+      case _ => true
+    }
+    val string = if (fullyCreated) tree.toString else ""
+    c.Expr[String](Literal(Constant(string.replaceAll("[\\r\\n\\s]+", " "))))
   }
 
 
