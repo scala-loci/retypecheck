@@ -6,7 +6,6 @@ The issue is described in [SI-5464](http://issues.scala-lang.org/browse/SI-5464)
 Ideally, it should be possible to 1) type-check an AST, 2) transform the AST and
 3) re-type-check the transformed AST. This does not work for all ASTs using the
 `typecheck` and `untypecheck` methods provided by the Scala reflection library.
-The situation should improve with *[scala.meta](http://scalameta.org/)*.
 
 On a `Context` `c`, *retypecheck* provides the methods `c.retyper.typecheck`,
 `c.retyper.untypecheck` (based on standard `c.untypecheck`),
@@ -30,7 +29,7 @@ of the compiler's desugerings during type-checking.
 2. Add the dependency to your `build.sbt`:
 
    ```scala
-   libraryDependencies += "de.tuda.stg" %% "retypecheck" % "0.4.0"
+   libraryDependencies += "de.tuda.stg" %% "retypecheck" % "0.5.0"
    ```
 
 ### Example Usage

@@ -52,7 +52,7 @@ class TyperSpec extends FlatSpec with Matchers {
 
   it should "typecheck getter/setter properties" in {
     "TyperTester.retyper { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot typeCheck
-     "TyperTester.retyperAll { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot typeCheck
+    "TyperTester.retyperAll { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot typeCheck
     "@TyperTester.retyper class C { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" should compile
     "@TyperTester.retyperAll class C { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" should compile
   }

@@ -4,7 +4,7 @@ import org.scalatest._
 import scala.async.Async._
 import scala.concurrent.Future
 
-class TyperWithScalaAsync extends AsyncFlatSpec with Matchers {
+class TyperWithScalaAsyncSpec extends AsyncFlatSpec with Matchers {
   behavior of "Typer for code using Scala Async examples"
 
   it should "correctly compile async block with await calls" in {

@@ -345,14 +345,14 @@ class ReTyper[+C <: Context](val c: C) {
 
 
   private def fixTypesAndSymbols(tree: Tree): Tree = {
-    val definedTypeSymbols = tree collect {
+    val definedTypeSymbols = (tree collect {
       case tree @ TypeDef(_, _, _, _) if tree.symbol.isType =>
         tree.symbol
       case tree @ ClassDef(_, _, _, _) if tree.symbol.isClass =>
         tree.symbol
       case tree @ ModuleDef(_, _, _) if tree.symbol.isModule =>
         tree.symbol.asModule.moduleClass
-    }
+    }).toSet
 
     val classNesting =
       mutable.ListBuffer(ownerChain(c.internal.enclosingOwner).reverse: _*)
@@ -396,7 +396,7 @@ class ReTyper[+C <: Context](val c: C) {
           val defDef = DefDef(
             transformModifiers(mods), termNames.CONSTRUCTOR,
             transformTypeDefs(tparams), transformValDefss(vparamss),
-            tpt, transform(rhs))
+            TypeTree(), transform(rhs))
           internal setSymbol (defDef, tree.symbol)
           internal setType (defDef, tree.tpe)
           internal setPos (defDef, tree.pos)
@@ -592,7 +592,7 @@ class ReTyper[+C <: Context](val c: C) {
             super.transform(tree)
         }
 
-        owner foreach { owners += _ }
+        owner foreach { owners -= _ }
 
         result
       }
@@ -669,6 +669,11 @@ class ReTyper[+C <: Context](val c: C) {
   }
 
   private def fixTypecheck(tree: Tree): Tree = {
+    val definedSymbols = (tree collect {
+      case tree: DefTree if tree.symbol != null && tree.symbol != NoSymbol =>
+        tree.symbol
+    }).toSet
+
     val rhss = (tree collect {
       case valDef @ ValDef(_, _, _, _) if valDef.symbol.isTerm =>
         val term = valDef.symbol.asTerm
@@ -697,10 +702,10 @@ class ReTyper[+C <: Context](val c: C) {
         defDef.symbol
     }
 
-    val accessedDefaultArgs = tree collect {
+    val accessedDefaultArgs = (tree collect {
       case select @ Select(_, _) if definedDefaultArgs contains select.symbol =>
         select.symbol
-    }
+    }).toSet
 
     def processDefaultArgs(stats: List[Tree]) = {
       val macroDefaultArgs = mutable.ListBuffer.empty[DefDef]
@@ -750,12 +755,6 @@ class ReTyper[+C <: Context](val c: C) {
           annotations: List[Annotation] = List.empty): Modifiers = {
         val flags = cleanModifiers(mods).flags
 
-        val privateWithin =
-          if (symbol.privateWithin != NoSymbol)
-            symbol.privateWithin.name
-          else
-            mods.privateWithin
-
         val allAnnotations =
           (mods.annotations ++
            (symbol.annotations map { _.tree }) ++
@@ -768,7 +767,7 @@ class ReTyper[+C <: Context](val c: C) {
                 transformedTree :: all
             }.reverse
 
-        Modifiers(flags, privateWithin, allAnnotations)
+        Modifiers(flags, mods.privateWithin, allAnnotations)
       }
 
       override def transform(tree: Tree) = tree match {
@@ -795,10 +794,12 @@ class ReTyper[+C <: Context](val c: C) {
             else TermName(s"${name.toString}$$macro")
           super.transform(Select(qualifier, macroName))
 
-        case Ident(_) if tree.symbol.isTerm =>
-          internal setSymbol (
-            internal setType (expandSymbol(tree.symbol, tree.pos), tree.tpe),
-            tree.symbol)
+        case Ident(name) if tree.symbol.isTerm && name == tree.symbol.name =>
+          val expandedTree = expandSymbol(tree.symbol, tree.pos)
+          if (expandedTree exists { definedSymbols contains _.symbol })
+            tree
+          else
+            expandedTree
 
         // fix renamed imports
         case Select(qual, _) if tree.symbol != NoSymbol =>
