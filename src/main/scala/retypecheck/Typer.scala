@@ -370,6 +370,13 @@ class ReTyper[+C <: Context](val c: C) {
       definedTypeSymbols contains _.typeSymbol
     }
 
+    def hasNonRepresentableType(trees: List[Tree]) = trees exists { tree =>
+      tree.tpe != null && (tree.tpe exists {
+        case TypeRef(NoPrefix, name, List()) => name.toString endsWith ".type"
+        case _ => false
+      })
+    }
+
     object typesAndSymbolsFixer extends Transformer {
       override def transform(tree: Tree) = tree match {
         case tree: TypeTree =>
@@ -421,16 +428,28 @@ class ReTyper[+C <: Context](val c: C) {
           internal setPos (valDef, tree.pos)
 
         case TypeApply(fun, targs) =>
-          val hasNonRepresentableType = targs exists { arg =>
-            arg.tpe != null && (arg.tpe exists {
-              case TypeRef(NoPrefix, name, List()) =>
-                name.toString endsWith ".type"
-              case _ =>
-                false
-            })
+          if (hasNonRepresentableType(targs))
+            transform(fun)
+          else
+            super.transform(tree)
+
+        case Apply(fun, args)
+            if tree.symbol != null && tree.symbol.isMethod && {
+              val paramLists = tree.symbol.asMethod.paramLists
+              paramLists.size == 1 &&
+                paramLists.head.nonEmpty &&
+                paramLists.head.head.isImplicit
+            } =>
+          val hasNonRepresentableTypeArg = args exists {
+            case Apply(TypeApply(_, targs), _) =>
+              hasNonRepresentableType(targs)
+            case TypeApply(_, targs) =>
+              hasNonRepresentableType(targs)
+            case _ =>
+              false
           }
 
-          if (hasNonRepresentableType)
+          if (hasNonRepresentableTypeArg)
             transform(fun)
           else
             super.transform(tree)
