@@ -50,6 +50,13 @@ class TyperSpec extends FlatSpec with Matchers {
     "@TyperTester.retyperAll class C { lazy val a = 0; val x = a }" should compile
   }
 
+  it should "typecheck early initializers" in {
+    "TyperTester.retyper { class C; val c = new { val x = 1 } with C }" should compile
+    "TyperTester.retyperAll { class C; val c = new { val x = 1 } with C }" should compile
+    "@TyperTester.retyper object o { class C; val c = new { val x = 1 } with C }" should compile
+    "@TyperTester.retyperAll object o { class C; val c = new { val x = 1 } with C }" should compile
+  }
+
   it should "typecheck getter/setter properties" in {
     "TyperTester.retyper { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot typeCheck
     "TyperTester.retyperAll { def a = 0; def a_=(v: Int) = (); val x = a; a = 0 }" shouldNot typeCheck

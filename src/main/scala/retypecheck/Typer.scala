@@ -810,7 +810,6 @@ class ReTyper[+C <: Context](val c: C) {
         List(term.getterOrNoSymbol -> valDef, term.setterOrNoSymbol -> valDef)
     }).flatten.toMap - NoSymbol
 
-
     def defaultArgDef(defDef: DefDef): Boolean = {
       val nameString = defDef.name.toString
       val symbol = defDef.symbol.owner.owner
@@ -971,7 +970,9 @@ class ReTyper[+C <: Context](val c: C) {
           val valAnnotations = (rhss get tree.symbol).toList flatMap {
             _.symbol.annotations }
           val newMods = Modifiers(
-            mods.flags | (if (!valDef.symbol.asTerm.isStable) MUTABLE else NoFlags),
+            mods.flags
+              | (if (!valDef.symbol.asTerm.isStable) MUTABLE else NoFlags)
+              | (if (valDef.mods hasFlag PRESUPER) PRESUPER else NoFlags),
             mods.privateWithin,
             mods.annotations)
           val newValDef = ValDef(
@@ -1076,6 +1077,18 @@ class ReTyper[+C <: Context](val c: C) {
   }
 
   private def fixUntypecheck(tree: Tree): Tree = {
+    def replaceSuperCall(call: Tree, replacement: Tree): Option[Tree] =
+      call match {
+        case Apply(fun, args) =>
+          replaceSuperCall(fun, replacement) map { Apply(_, args) }
+        case TypeApply(fun, args) =>
+          replaceSuperCall(fun, replacement) map { TypeApply(_, args) }
+        case Select(Super(_, _), termNames.CONSTRUCTOR) =>
+          Some(replacement)
+        case _ =>
+          None
+      }
+
     object untypecheckFixer extends Transformer {
       override def transform(tree: Tree) = tree match {
         case tree: TypeTree =>
@@ -1121,6 +1134,65 @@ class ReTyper[+C <: Context](val c: C) {
                (name.toString contains "$default$") &&
                !(name.toString endsWith "$macro") =>
           EmptyTree
+
+        case ClassDef(mods, tpname, tparams, Template(parents, self, body))
+            if (tpname.toString startsWith "$anon") && parents.nonEmpty =>
+          val fixedPreSuperBody = body map {
+            case tree @ ValDef(mods, name, tpt, rhs) if mods hasFlag PRESUPER =>
+              tpt match {
+                case tpt: TypeTree =>
+                  tree
+                case tpt =>
+                  ValDef(mods, name, internal setOriginal (TypeTree(), tpt), rhs)
+              }
+            case tree =>
+              tree
+          }
+
+          if (body != fixedPreSuperBody) {
+            val (fixedBody, fixedParentOptions) = (fixedPreSuperBody map {
+              case tree @ DefDef(
+                  mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt, rhs) =>
+                rhs match {
+                  case Block(stats, expr) =>
+                    val (fixedStats, fixedParentOptions) = (stats map { stat =>
+                      val fixedParent = replaceSuperCall(stat, parents.head)
+                      if (fixedParent.nonEmpty)
+                        pendingSuperCall -> fixedParent
+                      else
+                        stat -> fixedParent
+                    }).unzip
+
+                    val fixedParent =
+                      fixedParentOptions collect { case Some(parent) => parent }
+
+                    if (fixedParent.size == 1)
+                      DefDef(
+                        mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt,
+                        Block(fixedStats, expr)) -> fixedParent.headOption
+                    else
+                      tree -> None
+
+                  case tree =>
+                    tree -> None
+                }
+
+              case tree =>
+                tree -> None
+            }).unzip
+
+            val fixedParent =
+              fixedParentOptions collect { case Some(parent) => parent }
+
+            if (fixedParent.size == 1)
+              super.transform(
+                ClassDef(mods, tpname, tparams,
+                  Template(fixedParent.head :: parents.tail, self, fixedBody)))
+            else
+              super.transform(tree)
+          }
+          else
+            super.transform(tree)
 
         case ModuleDef(mods, name, Template(parents, self, body)) =>
           super.transform(tree) match {
