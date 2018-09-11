@@ -42,7 +42,7 @@ class ReTyper[+C <: Context](val c: C) {
    * [[https://issues.scala-lang.org/browse/SI-5464 SI-5464]].
    */
   def typecheck(tree: Tree): Tree =
-    try fixTypecheck(c typecheck tree)
+    try fixTypecheck(selfReferenceFixer transform (c typecheck tree))
     catch {
       case TypecheckException(pos, msg) =>
         c.abort(pos.asInstanceOf[Position], msg)
@@ -321,8 +321,7 @@ class ReTyper[+C <: Context](val c: C) {
     val tree =
       if (symbol == c.mirror.RootClass)
         Ident(termNames.ROOTPKG)
-      else if (!symbol.owner.isClass &&
-               !symbol.owner.isModule &&
+      else if (!symbol.owner.isModule &&
                !symbol.owner.isModuleClass &&
                !symbol.owner.isPackage &&
                !symbol.owner.isPackageClass)
@@ -338,8 +337,8 @@ class ReTyper[+C <: Context](val c: C) {
     else
       symbol :: ownerChain(symbol.owner)
 
-  private def isAccessible(symbol: Symbol, currentOwners: Set[Symbol]) =
-    ownerChain(symbol).toSet diff currentOwners forall { symbol =>
+  private def isAccessible(symbol: Symbol, owners: collection.Set[Symbol]) =
+    ownerChain(symbol).toSet diff owners forall { symbol =>
       !symbol.isPrivate && !symbol.isProtected
     }
 
@@ -354,8 +353,12 @@ class ReTyper[+C <: Context](val c: C) {
         tree.symbol.asModule.moduleClass
     }).toSet
 
-    val classNesting =
-      mutable.ListBuffer(ownerChain(c.internal.enclosingOwner).reverse: _*)
+    val owners = ownerChain(c.internal.enclosingOwner)
+
+    val classNestingSet = mutable.Set(owners: _*)
+
+    val classNestingList =
+      mutable.ListBuffer((owners.reverse map { _.name.toTypeName }): _*)
 
     def prependRootPackage(tree: Tree): Tree = tree match {
       case Ident(name) if tree.symbol.owner == c.mirror.RootClass =>
@@ -383,20 +386,34 @@ class ReTyper[+C <: Context](val c: C) {
           if (tree.original != null)
             transform(prependRootPackage(tree.original))
           else if (tree.tpe != null && isTypeUnderExpansion(tree.tpe))
-            createTypeTree(tree.tpe, tree.pos, classNesting.toSet)
+            createTypeTree(tree.tpe, tree.pos, classNestingSet)
           else
             TypeTree(tree.tpe)
 
-        case ClassDef(_, _, _, _) if tree.symbol.isClass =>
-          classNesting prepend tree.symbol
+        case ClassDef(_, tpname, _, _) =>
+          classNestingList prepend tpname
+          if (tree.symbol.isClass)
+            classNestingSet += tree.symbol
+
           val classDef = super.transform(tree)
-          classNesting remove 0
+
+          if (tree.symbol.isClass)
+            classNestingSet -= tree.symbol
+          classNestingList remove 0
+
           classDef
 
-        case ModuleDef(_, _, _) if tree.symbol.isModule =>
-          classNesting prepend tree.symbol.asModule.moduleClass
+        case ModuleDef(_, tname, _) =>
+          classNestingList prepend tname.toTypeName
+          if (tree.symbol.isModule)
+            classNestingSet += tree.symbol.asModule.moduleClass
+
           val moduleDef = super.transform(tree)
-          classNesting remove 0
+
+          if (tree.symbol.isModule)
+            classNestingSet -= tree.symbol.asModule.moduleClass
+          classNestingList remove 0
+
           moduleDef
 
         case DefDef(mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt, rhs) =>
@@ -458,12 +475,10 @@ class ReTyper[+C <: Context](val c: C) {
           Ident(termNames.CONSTRUCTOR)
 
         case Select(qualifier @ This(qual), name) =>
-          val owners = classNesting.toSet
-
           val fixedEnclosingSelfReference =
             if (!qualifier.symbol.isModuleClass)
-              classNesting collectFirst {
-                case symbol if symbol.name == qualifier.symbol.name =>
+              classNestingList collectFirst {
+                case outerName if outerName == qualifier.symbol.name =>
                   Ident(name)
               }
             else
@@ -472,9 +487,9 @@ class ReTyper[+C <: Context](val c: C) {
           fixedEnclosingSelfReference getOrElse {
             if (qual != typeNames.EMPTY &&
                 qualifier.symbol.isModuleClass &&
-                isAccessible(tree.symbol, owners) &&
+                isAccessible(tree.symbol, classNestingSet) &&
                 !isTypeUnderExpansion(qualifier.symbol.asType.toType) &&
-                !(owners contains qualifier.symbol))
+                !(classNestingSet contains qualifier.symbol))
               Select(expandSymbol(qualifier.symbol, qualifier.pos), name)
             else
               super.transform(tree)
@@ -622,13 +637,41 @@ class ReTyper[+C <: Context](val c: C) {
 
 
   private def selfReferenceFixer = new Transformer {
-    val stack = mutable.ListBuffer.empty[(TypeName, Set[Name])]
+    type ImplEnv = (Symbol, TypeName, Set[Name], Option[ValDef])
+    type BlockEnv = Set[Name]
+
+    val ownerStack: List[Either[ImplEnv, BlockEnv]] =
+      (ownerChain(c.internal.enclosingOwner)
+        filter { symbol =>
+          (symbol.isClass || symbol.isModuleClass) &&
+          !symbol.isPackage &&
+          !symbol.isPackageClass
+        }
+        map { symbol =>
+          val typeSymbol = symbol.asType
+          val members = typeSymbol.toType.members
+          val names = (members map { _.name }).toSet[Name]
+          Left((symbol, typeSymbol.name, names, None))
+        })
+
+    val stack = mutable.ListBuffer(ownerStack: _*)
 
     override def transform(tree: Tree) = tree match {
+      case tree: TypeTree =>
+        if (tree.original != null)
+          internal setOriginal (tree, transform(tree.original))
+        tree
+
       case implDef: ImplDef =>
-        stack prepend implDef.name.toTypeName -> (
+        val symbol =
+          if (implDef.symbol.isModule)
+            implDef.symbol.asModule.moduleClass
+          else
+            implDef.symbol
+
+        val names =
           (implDef.impl.parents flatMap { parent =>
-            if (parent.symbol.isType)
+            if (parent.symbol != null && parent.symbol.isType)
               parent.symbol.asType.toType.members map { _.name }
             else
               Iterable.empty
@@ -636,46 +679,114 @@ class ReTyper[+C <: Context](val c: C) {
           (implDef.impl.body collect {
             case defTree: DefTree => defTree.name
           })
-        ).toSet
+
+        val self =
+          if (implDef.impl.self.name != termNames.EMPTY)
+            Some(implDef.impl.self)
+          else
+            None
+
+        stack prepend Left((symbol, implDef.name.toTypeName, names.toSet, self))
 
         val tree = super.transform(implDef)
         stack remove 0
         tree
 
-      case Select(thisTree @ This(thisName), selectedName) =>
-        val lookupResult =
-          if (thisName.toString startsWith "$anon")
-            Some(false)
-          else
-            stack collectFirst {
-              case (name, names) if name == thisName =>
-                names contains selectedName
-            }
-
-        lookupResult match {
-          case Some(false) =>
-            val ident = Ident(selectedName)
-            if (tree.pos != NoPosition)
-              internal setPos (ident, tree.pos)
-            else
-              internal setPos (ident, thisTree.pos)
-            internal setType (ident, tree.tpe)
-
-          case Some(true) =>
-            tree
-
-          case None =>
-            if (thisTree.symbol.isModuleClass &&
-                !thisTree.symbol.isPackage &&
-                !thisTree.symbol.isPackageClass)
-              Select(Ident(thisName.toTermName), selectedName)
-            else
-              tree
+      case block: Block =>
+        val names = block.stats collect {
+          case defTree: DefTree => defTree.name
         }
+
+        stack prepend Right(names.toSet)
+
+        val tree = super.transform(block)
+        stack remove 0
+        tree
+
+      case Select(thisTree @ This(thisName), selectedName) =>
+        trait Modification
+        case class Self(self: ValDef) extends Modification
+        case object Unqualified extends Modification
+        case object Stable extends Modification
+        case object Unmodified extends Modification
+
+        val (modification, _, _) =
+          stack.foldLeft[(Modification, Set[Name], Boolean)](
+              (Stable, Set.empty, true)) {
+            case ((modification, shadowed, innerImpl),
+                  Left((symbol, name, names, self))) =>
+              val updatedShadowed = shadowed ++ names
+
+              val updatedModification =
+                if (symbol != NoSymbol &&
+                    symbol == thisTree.symbol &&
+                    modification == Unmodified) {
+                  if ((updatedShadowed contains selectedName) ||
+                      tree.symbol == NoSymbol)
+                    (self
+                      filterNot { updatedShadowed contains _.name }
+                      map Self
+                      getOrElse Unmodified)
+                  else
+                    Unqualified
+                }
+                else if ((name == thisName ||
+                         (innerImpl && thisName == typeNames.EMPTY)) &&
+                          modification == Stable) {
+                  if ((updatedShadowed contains selectedName) ||
+                      tree.symbol == NoSymbol)
+                    Unmodified
+                  else
+                    Unqualified
+                }
+                else
+                  modification
+
+              (self
+                map { self =>
+                  (updatedModification, updatedShadowed + self.name, false)
+                }
+                getOrElse {
+                  (updatedModification, updatedShadowed, false)
+                })
+
+            case ((modification, shadowed, innerImpl), Right(names)) =>
+              (modification, shadowed ++ names, innerImpl)
+          }
+
+        val result = modification match {
+          case Self(self) =>
+            val qualifier = Ident(self.name) withAttrs (
+              self.symbol,
+              thisTree.tpe,
+              if (thisTree.pos != NoPosition) thisTree.pos else tree.pos)
+            Some(Select(qualifier, selectedName))
+          case Unqualified =>
+            Some(Ident(selectedName))
+          case Stable if thisTree.symbol != NoSymbol =>
+            val qualifier = expandSymbol(thisTree.symbol, thisTree.pos)
+            Some(Select(qualifier, selectedName))
+          case _ =>
+            None
+        }
+
+        result map {
+          _ withAttrs (
+            tree.symbol,
+            tree.tpe,
+            if (tree.pos != NoPosition) tree.pos else thisTree.pos)
+        } getOrElse tree
 
       case _ =>
         super.transform(tree)
     }
+  }
+
+  private implicit class TreeOps(tree: Tree) {
+    def withAttrs(symbol: Symbol, tpe: Type, pos: Position) =
+      internal setPos (
+        internal setType (
+          internal setSymbol (tree, symbol), tpe), pos)
   }
 
   private implicit class TermOps(term: TermSymbol) {
