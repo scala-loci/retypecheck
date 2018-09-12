@@ -63,14 +63,39 @@ object TyperTester {
 
   def createTypeTreeImpl[T: c.WeakTypeTag](c: Context): c.Expr[String] = {
     import c.universe._
+
+    object withAttrs extends Transformer {
+      override def transform(tree: Tree) = tree match {
+        case _: TypeTree => Ident(typeNames.ERROR)
+        case _ => super.transform(tree)
+      }
+    }
+
+    object withoutAttrs extends Transformer {
+      override def transform(tree: Tree) = tree match {
+        case _: TypeTree =>
+          Ident(typeNames.ERROR)
+        case _ =>
+          if (tree.symbol != null && tree.symbol != NoSymbol)
+            internal setSymbol (tree, NoSymbol)
+          super.transform(internal setType (tree, null))
+      }
+    }
+
     val t = c.retyper
     val tree = t createTypeTree (weakTypeOf[T], NoPosition)
-    val fullyCreated = tree forAll {
-      case _: TypeTree => false
-      case _ => true
-    }
-    val string = if (fullyCreated) tree.toString else ""
-    c.Expr[String](Literal(Constant(string.replaceAll("[\\r\\n\\s]+", " "))))
+
+    val stringWithAttrs = (withAttrs transform tree.duplicate).toString
+      .replaceAll("[\\r\\n\\s]+", " ")
+    val stringWithoutAttrs = (withoutAttrs transform tree.duplicate).toString
+      .replaceAll("[\\r\\n\\s]+", " ")
+    val string =
+      if (stringWithAttrs != stringWithoutAttrs)
+        s"different representations: <$stringWithAttrs> vs <$stringWithoutAttrs>"
+      else
+        stringWithAttrs
+
+    c.Expr[String](Literal(Constant(string)))
   }
 
 

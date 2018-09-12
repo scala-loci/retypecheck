@@ -129,21 +129,41 @@ class ReTyper[+C <: Context](val c: C) {
       owners: collection.Set[Symbol]): Tree = {
     val allOwners = ownerChain(c.internal.enclosingOwner).toSet union owners
 
-    def expandPrefix(pre: Type, sym: Symbol) = {
+    def expandPrefix(pre: Type, sym: Symbol) =
       if (pre != NoPrefix) {
         val preTree = expandType(pre)
 
-        val pathTree = preTree match {
+        val prePathTree = preTree match {
           case SingletonTypeTree(Select(qualifier, name)) =>
-            Select(qualifier, name.toTermName)
+            Some(Select(qualifier, name.toTermName))
           case SingletonTypeTree(Ident(name)) =>
-            Ident(name.toTermName)
+            Some(Ident(name.toTermName))
           case Select(qualifier, name) =>
-            Select(qualifier, name.toTermName)
+            Some(Select(qualifier, name.toTermName))
           case Ident(name) =>
-            Ident(name.toTermName)
-          case tree =>
-            tree
+            Some(Ident(name.toTermName))
+          case _ =>
+            None
+        }
+
+        val pathTree = prePathTree match {
+          case Some(tree) =>
+            val preSymbol = pre.typeSymbol
+            if (preSymbol.isModuleClass) {
+              val symbol = preSymbol.asClass.module
+              val owner = symbol.owner
+              val sym =
+                if (symbol.name == termNames.PACKAGE && owner.isModuleClass)
+                  owner.asClass.module
+                else
+                  symbol
+              tree withAttrs (sym, sym.typeSignature, pos)
+            }
+            else
+              tree withAttrs (pre.typeSymbol, pre, pos)
+
+          case _ =>
+            preTree
         }
 
         val typeProjection = preTree match {
@@ -166,151 +186,162 @@ class ReTyper[+C <: Context](val c: C) {
       }
       else
         Ident(sym.name)
-    }
 
-    def expandType(tpe: Type): Tree = tpe match {
-      case ThisType(pre) if pre.isType && !pre.isModule && !pre.isPackage =>
-        This(pre.asType.name)
+    def expandType(tpe: Type): Tree = {
+      val tree = tpe match {
+        case ThisType(pre) if pre.isType && !pre.isModule && !pre.isPackage =>
+          This(pre.asType.name) withAttrs (tpe.typeSymbol, tpe, pos)
 
-      case ThisType(pre) if isAccessible(pre, allOwners) =>
-        expandSymbol(pre, pos)
+        case ThisType(pre) if isAccessible(pre, allOwners) =>
+          expandSymbol(pre, pos)
 
-      case TypeRef(pre, sym, args) =>
-        val prefix = expandPrefix(pre, sym)
-        if (!args.isEmpty)
-          AppliedTypeTree(prefix, args map expandType)
-        else
-          prefix
+        case TypeRef(pre, sym, args) =>
+          val prefix = expandPrefix(pre, sym)
+          if (!args.isEmpty)
+            AppliedTypeTree(
+                prefix withAttrs (
+                  sym, internal typeRef (pre, sym, List.empty), pos),
+                args map expandType) withAttrs (
+              sym, tpe, pos)
+          else
+            prefix withAttrs (sym, tpe, pos)
 
-      case SingleType(pre, sym) =>
-        expandPrefix(pre, sym) match {
-          case Select(prefix, termNames.PACKAGE) if pre.typeSymbol.isPackage =>
-            prefix
-          case prefix =>
-            SingletonTypeTree(prefix)
-        }
-
-      case TypeBounds(lo, hi) =>
-        TypeBoundsTree(
-          if (lo =:= definitions.NothingTpe) EmptyTree else expandType(lo),
-          if (hi =:= definitions.AnyTpe) EmptyTree else expandType(hi))
-
-      case ExistentialType(quantified, underlying) =>
-        object singletonTypeNameFixer extends Transformer {
-          override def transform(tree: Tree) = tree match {
-            case Ident(TypeName(name)) if name endsWith ".type" =>
-              Ident(TermName(name substring (0, name.size - 5)))
-            case _ =>
-              super.transform(tree)
+        case SingleType(pre, sym) =>
+          expandPrefix(pre, sym) match {
+            case Select(prefix, termNames.PACKAGE) if pre.typeSymbol.isPackage =>
+              prefix
+            case prefix =>
+              SingletonTypeTree(prefix withAttrs (sym, tpe, pos))
           }
-        }
 
-        val whereClauses = quantified map { quantified =>
-          quantified.typeSignature match {
-            case TypeBounds(lo, hi) =>
-              val name = quantified.name.toString
-              val mods = Modifiers(
-                DEFERRED | (if (quantified.isSynthetic) SYNTHETIC else NoFlags))
+        case TypeBounds(lo, hi) =>
+          TypeBoundsTree(
+            if (lo =:= definitions.NothingTpe) EmptyTree else expandType(lo),
+            if (hi =:= definitions.AnyTpe) EmptyTree else expandType(hi))
 
-              if (!(name endsWith ".type"))
-                Some(TypeDef(
-                  mods,
-                  TypeName(name),
-                  List.empty,
-                  expandType(quantified.typeSignature)))
-              else if (lo =:= definitions.NothingTpe)
-                Some(ValDef(
-                  mods,
-                  TermName(name substring (0, name.size - 5)),
-                  expandType(hi),
-                  EmptyTree))
-              else
+        case ExistentialType(quantified, underlying) =>
+          object singletonTypeNameFixer extends Transformer {
+            override def transform(tree: Tree) = tree match {
+              case Ident(TypeName(name)) if name endsWith ".type" =>
+                Ident(TermName(name substring (0, name.size - 5)))
+              case _ =>
+                super.transform(tree)
+            }
+          }
+
+          val whereClauses = quantified map { quantified =>
+            quantified.typeSignature match {
+              case TypeBounds(lo, hi) =>
+                val name = quantified.name.toString
+                val mods = Modifiers(
+                  DEFERRED | (if (quantified.isSynthetic) SYNTHETIC else NoFlags))
+
+                if (!(name endsWith ".type"))
+                  Some(TypeDef(
+                    mods,
+                    TypeName(name),
+                    List.empty,
+                    expandType(quantified.typeSignature)))
+                else if (lo =:= definitions.NothingTpe)
+                  Some(ValDef(
+                    mods,
+                    TermName(name substring (0, name.size - 5)),
+                    expandType(hi),
+                    EmptyTree))
+                else
+                  None
+
+              case _ =>
                 None
+            }
+          }
 
-            case _ =>
+          if (whereClauses exists { _.isEmpty })
+            TypeTree(tpe)
+          else
+            ExistentialTypeTree(
+              singletonTypeNameFixer transform expandType(underlying),
+              whereClauses.flatten)
+
+        case ClassInfoType(parents, decls, typeSymbol) =>
+          val publicDecls = internal newScopeWith (decls.toSeq filter { symbol =>
+            symbol.isPublic && !symbol.isConstructor
+          }: _*)
+          expandType(internal refinedType (parents, publicDecls, typeSymbol))
+
+        case RefinedType(parents, scope) =>
+          def refiningType(sym: TypeSymbol): TypeDef = {
+            val anyTree = Select(
+              Select(
+                Ident(termNames.ROOTPKG),
+                TermName("scala")),
+              TypeName("Any"))
+
+            val (tree, deferred) = expandType(sym.typeSignature) match {
+              case `anyTree` if sym.isClass =>
+                TypeBoundsTree(EmptyTree, EmptyTree) -> true
+              case tree if sym.isClass =>
+                TypeBoundsTree(EmptyTree, tree) -> true
+              case tree @ TypeBoundsTree(_, _) =>
+                tree -> true
+              case tree =>
+                tree -> false
+            }
+
+            TypeDef(
+              if (deferred) Modifiers(DEFERRED) else Modifiers(),
+              sym.name,
+              sym.typeParams map { param => refiningType(param.asType) },
+              tree)
+          }
+
+          def refiningVal(sym: TermSymbol, flags: FlagSet): ValDef =
+            ValDef(
+              Modifiers(flags),
+              sym.name,
+              expandType(sym.typeSignature.finalResultType),
+              EmptyTree)
+
+          def refiningDef(sym: MethodSymbol, flags: FlagSet): DefDef =
+            DefDef(
+              Modifiers(flags),
+              sym.name,
+              sym.typeParams map { param => refiningType(param.asType) },
+              sym.paramLists map {
+                _ map { param => refiningVal(param.asTerm, PARAM) }
+              },
+              expandType(sym.typeSignature.finalResultType),
+              EmptyTree)
+
+          val body = scope map { symbol =>
+            if (symbol.isMethod) {
+              val method = symbol.asMethod
+              if (method.isStable)
+                Some(refiningVal(method, DEFERRED))
+              else
+                Some(refiningDef(method, DEFERRED))
+            }
+            else if (symbol.isType)
+              Some(refiningType(symbol.asType))
+            else
               None
           }
-        }
 
-        if (whereClauses exists { _.isEmpty })
-          TypeTree(tpe)
-        else
-          ExistentialTypeTree(
-            singletonTypeNameFixer transform expandType(underlying),
-            whereClauses.flatten)
-
-      case ClassInfoType(parents, decls, typeSymbol) =>
-        val publicDecls = internal newScopeWith (decls.toSeq filter { symbol =>
-          symbol.isPublic && !symbol.isConstructor
-        }: _*)
-        expandType(internal refinedType (parents, publicDecls, typeSymbol))
-
-      case RefinedType(parents, scope) =>
-        def refiningType(sym: TypeSymbol): TypeDef = {
-          val anyTree = Select(
-            Select(
-              Ident(termNames.ROOTPKG),
-              TermName("scala")),
-            TypeName("Any"))
-
-          val (tree, deferred) = expandType(sym.typeSignature) match {
-            case `anyTree` if sym.isClass =>
-              TypeBoundsTree(EmptyTree, EmptyTree) -> true
-            case tree if sym.isClass =>
-              TypeBoundsTree(EmptyTree, tree) -> true
-            case tree @ TypeBoundsTree(_, _) =>
-              tree -> true
-            case tree =>
-              tree -> false
-          }
-
-          TypeDef(
-            if (deferred) Modifiers(DEFERRED) else Modifiers(),
-            sym.name,
-            sym.typeParams map { param => refiningType(param.asType) },
-            tree)
-        }
-
-        def refiningVal(sym: TermSymbol): ValDef =
-          ValDef(
-            Modifiers(DEFERRED),
-            sym.name,
-            expandType(sym.typeSignature.finalResultType),
-            EmptyTree)
-
-        def refiningDef(sym: MethodSymbol): DefDef =
-          DefDef(
-            Modifiers(DEFERRED),
-            sym.name,
-            sym.typeParams map { param => refiningType(param.asType) },
-            sym.paramLists map { _ map { param => refiningVal(param.asTerm) } },
-            expandType(sym.typeSignature.finalResultType),
-            EmptyTree)
-
-        val body = scope map { symbol =>
-          if (symbol.isMethod) {
-            val method = symbol.asMethod
-            if (method.isStable)
-              Some(refiningVal(method))
-            else
-              Some(refiningDef(method))
-          }
-          else if (symbol.isType)
-            Some(refiningType(symbol.asType))
+          if (body exists { _.isEmpty })
+            TypeTree(tpe)
+          else if (body.isEmpty && parents.size == 1)
+            expandType(parents.head)
           else
-            None
-        }
+            CompoundTypeTree(
+              Template(parents map expandType, noSelfType, body.toList.flatten))
 
-        if (body exists { _.isEmpty })
+        case _ =>
           TypeTree(tpe)
-        else if (body.isEmpty && parents.size == 1)
-          expandType(parents.head)
-        else
-          CompoundTypeTree(
-            Template(parents map expandType, noSelfType, body.toList.flatten))
+      }
 
-      case _ =>
-        TypeTree(tpe)
+      if (tree.tpe == null)
+        internal setType (tree, tpe)
+      internal setPos (tree, pos)
     }
 
     expandType(tpe)
@@ -328,7 +359,9 @@ class ReTyper[+C <: Context](val c: C) {
         Ident(symbol.name.toTermName)
       else
         Select(expandSymbol(symbol.owner, pos), symbol.name.toTermName)
-    internal setPos (tree, pos)
+
+    val sym = if (symbol.isModuleClass) symbol.asClass.module else symbol
+    tree withAttrs (sym, sym.typeSignature, pos)
   }
 
   private def ownerChain(symbol: Symbol): List[Symbol] =
@@ -421,9 +454,8 @@ class ReTyper[+C <: Context](val c: C) {
             transformModifiers(mods), termNames.CONSTRUCTOR,
             transformTypeDefs(tparams), transformValDefss(vparamss),
             TypeTree(), transform(rhs))
-          internal setSymbol (defDef, tree.symbol)
-          internal setType (defDef, tree.tpe)
-          internal setPos (defDef, tree.pos)
+
+          defDef withAttrs (tree.symbol, tree.tpe, tree.pos)
 
         case ValDef(mods, name, tpt, rhs) =>
           val typeTree = tpt match {
@@ -440,9 +472,8 @@ class ReTyper[+C <: Context](val c: C) {
           val valDef = ValDef(
             transformModifiers(mods), name, typeTree,
             transform(rhs))
-          internal setSymbol (valDef, tree.symbol)
-          internal setType (valDef, tree.tpe)
-          internal setPos (valDef, tree.pos)
+
+          valDef withAttrs (tree.symbol, tree.tpe, tree.pos)
 
         case TypeApply(fun, targs) =>
           if (hasNonRepresentableType(targs))
@@ -536,18 +567,14 @@ class ReTyper[+C <: Context](val c: C) {
             Template(parents, self, resetCaseImplBody(body)))
 
           internal updateAttachment (moduleDef, CaseClassMarker)
-          internal setSymbol (moduleDef, implDef.symbol)
-          internal setType (moduleDef, implDef.tpe)
-          internal setPos (moduleDef, implDef.pos)
+          moduleDef withAttrs (implDef.symbol, implDef.tpe, implDef.pos)
 
         case ClassDef(mods, tpname, tparams, Template(parents, self, body)) =>
           val classDef = ClassDef(mods, tpname, tparams,
             Template(parents, self, resetCaseImplBody(body)))
 
           internal updateAttachment (classDef, CaseClassMarker)
-          internal setSymbol (classDef, implDef.symbol)
-          internal setType (classDef, implDef.tpe)
-          internal setPos (classDef, implDef.pos)
+          classDef withAttrs (implDef.symbol, implDef.tpe, implDef.pos)
       }
 
       def fixCaseClasses(trees: List[Tree]) = {
@@ -978,9 +1005,7 @@ class ReTyper[+C <: Context](val c: C) {
           val newValDef = ValDef(
             fixModifiers(newMods, defDef.symbol, valAnnotations),
             name, transform(valDef.tpt), transform(valDef.rhs))
-          internal setSymbol (newValDef, defDef.symbol)
-          internal setType (newValDef, valDef.tpe)
-          internal setPos (newValDef, valDef.pos)
+          newValDef withAttrs (defDef.symbol, valDef.tpe, valDef.pos)
 
         // fix lazy vals
         case valOrDefDef: ValOrDefDef
@@ -1002,12 +1027,11 @@ class ReTyper[+C <: Context](val c: C) {
           val newValDef = ValDef(
             fixModifiers(mods, valOrDefDef.symbol, valAnnotations),
             valOrDefDef.name, transform(typeTree), transform(assignment))
-          internal setSymbol (newValDef, valOrDefDef.symbol)
-          valDef foreach { valDef =>
-            internal setType (newValDef, valDef.tpe)
-            internal setPos (newValDef, valDef.pos)
-          }
-          newValDef
+          newValDef withAttrs (
+            valOrDefDef.symbol,
+            valDef map { _.tpe } getOrElse valOrDefDef.tpe,
+            valDef map { _.pos } getOrElse valOrDefDef.pos
+          )
 
         // fix vals
         case valDef @ ValDef(mods, name, tpt, rhs)
@@ -1016,9 +1040,7 @@ class ReTyper[+C <: Context](val c: C) {
             fixModifiers(mods, valDef.symbol), name,
             transform(tpt),
             transform(rhs))
-          internal setSymbol (newValDef, valDef.symbol)
-          internal setType (newValDef, valDef.tpe)
-          internal setPos (newValDef, valDef.pos)
+          newValDef withAttrs (valDef.symbol, valDef.tpe, valDef.pos)
 
         // fix defs
         case defDef @ DefDef(mods, name, tparams, vparamss, tpt, rhs)
@@ -1043,9 +1065,7 @@ class ReTyper[+C <: Context](val c: C) {
             fixModifiers(mods, classDef.symbol), name,
             transformTypeDefs(tparams),
             transformTemplate(impl))
-          internal setSymbol (newClassDef, classDef.symbol)
-          internal setType (newClassDef, classDef.tpe)
-          internal setPos (newClassDef, classDef.pos)
+          newClassDef withAttrs (classDef.symbol, classDef.tpe, classDef.pos)
 
         // fix objects
         case moduleDef @ ModuleDef(mods, name, impl)
@@ -1053,9 +1073,7 @@ class ReTyper[+C <: Context](val c: C) {
           val newModuleDef = ModuleDef(
             fixModifiers(mods, moduleDef.symbol), name,
             transformTemplate(impl))
-          internal setSymbol (newModuleDef, moduleDef.symbol)
-          internal setType (newModuleDef, moduleDef.tpe)
-          internal setPos (newModuleDef, moduleDef.pos)
+          newModuleDef withAttrs (moduleDef.symbol, moduleDef.tpe, moduleDef.pos)
 
         // fix type definitions
         case typeDef @ TypeDef(mods, name, tparams, rhs)
@@ -1064,9 +1082,7 @@ class ReTyper[+C <: Context](val c: C) {
             fixModifiers(mods, typeDef.symbol), name,
             transformTypeDefs(tparams),
             transform(rhs))
-          internal setSymbol (newTypeDef, typeDef.symbol)
-          internal setType (newTypeDef, typeDef.tpe)
-          internal setPos (newTypeDef, typeDef.pos)
+          newTypeDef withAttrs (typeDef.symbol, typeDef.tpe, typeDef.pos)
 
         case _ =>
           super.transform(tree)
