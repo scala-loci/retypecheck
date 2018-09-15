@@ -455,7 +455,10 @@ class ReTyper[+C <: Context](val c: C) {
             transformTypeDefs(tparams), transformValDefss(vparamss),
             TypeTree(), transform(rhs))
 
-          defDef withAttrs (tree.symbol, tree.tpe, tree.pos)
+          defDef withAttrs (
+            tree.symbol,
+            tree.tpe,
+            if (tree.symbol.pos != NoPosition) tree.symbol.pos else tree.pos)
 
         case ValDef(mods, name, tpt, rhs) =>
           val typeTree = tpt match {

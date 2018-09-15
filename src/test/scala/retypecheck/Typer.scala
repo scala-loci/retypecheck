@@ -242,6 +242,13 @@ class TyperSpec extends FlatSpec with Matchers {
     "@TyperTester.retyperAll trait T { val v: WithTypeMember; type V <: v.U }" should compile
   }
 
+  it should "typecheck auxiliaries" in {
+    "TyperTester.retyper { class C(s: String) { def this(i: Int) = this(i.toString) } }" should compile
+    "TyperTester.retyperAll { class C(s: String) { def this(i: Int) = this(i.toString) } }" should compile
+    "@TyperTester.retyper object o { class C(s: String) { def this(i: Int) = this(i.toString) } }" should compile
+    "@TyperTester.retyperAll object o { class C(s: String) { def this(i: Int) = this(i.toString) } }" should compile
+  }
+
   it should "correctly compile case classes and objects in function literals" in {
     val v1 = TyperTester.retyper {
       val v = { argument: Int =>
