@@ -197,14 +197,15 @@ class ReTyper[+C <: Context](val c: C) {
 
         case TypeRef(pre, sym, args) =>
           val prefix = expandPrefix(pre, sym)
+          val symbol = if (isNonRepresentableType(tpe)) NoSymbol else sym
           if (!args.isEmpty)
             AppliedTypeTree(
                 prefix withAttrs (
-                  sym, internal typeRef (pre, sym, List.empty), pos),
+                  symbol, internal typeRef (pre, sym, List.empty), pos),
                 args map expandType) withAttrs (
-              sym, tpe, pos)
+              symbol, tpe, pos)
           else
-            prefix withAttrs (sym, tpe, pos)
+            prefix withAttrs (symbol, tpe, pos)
 
         case SingleType(pre, sym) =>
           expandPrefix(pre, sym) match {
@@ -220,36 +221,17 @@ class ReTyper[+C <: Context](val c: C) {
             if (hi =:= definitions.AnyTpe) EmptyTree else expandType(hi))
 
         case ExistentialType(quantified, underlying) =>
-          object singletonTypeNameFixer extends Transformer {
-            override def transform(tree: Tree) = tree match {
-              case Ident(TypeName(name)) if name endsWith ".type" =>
-                Ident(TermName(name substring (0, name.size - 5)))
-              case _ =>
-                super.transform(tree)
-            }
-          }
-
           val whereClauses = quantified map { quantified =>
             quantified.typeSignature match {
               case TypeBounds(lo, hi) =>
-                val name = quantified.name.toString
                 val mods = Modifiers(
                   DEFERRED | (if (quantified.isSynthetic) SYNTHETIC else NoFlags))
 
-                if (!(name endsWith ".type"))
-                  Some(TypeDef(
-                    mods,
-                    TypeName(name),
-                    List.empty,
-                    expandType(quantified.typeSignature)))
-                else if (lo =:= definitions.NothingTpe)
-                  Some(ValDef(
-                    mods,
-                    TermName(name substring (0, name.size - 5)),
-                    expandType(hi),
-                    EmptyTree))
-                else
-                  None
+                Some(TypeDef(
+                  mods,
+                  quantified.name.toTypeName,
+                  List.empty,
+                  expandType(quantified.typeSignature)))
 
               case _ =>
                 None
@@ -259,9 +241,7 @@ class ReTyper[+C <: Context](val c: C) {
           if (whereClauses exists { _.isEmpty })
             TypeTree(tpe)
           else
-            ExistentialTypeTree(
-              singletonTypeNameFixer transform expandType(underlying),
-              whereClauses.flatten)
+            ExistentialTypeTree(expandType(underlying), whereClauses.flatten)
 
         case ClassInfoType(parents, decls, typeSymbol) =>
           val publicDecls = internal newScopeWith (decls.toSeq filter { symbol =>
@@ -375,6 +355,11 @@ class ReTyper[+C <: Context](val c: C) {
       !symbol.isPrivate && !symbol.isProtected
     }
 
+  private def isNonRepresentableType(tpe: Type) = tpe match {
+    case TypeRef(NoPrefix, name, _) => name.toString endsWith ".type"
+    case _ => false
+  }
+
 
   private def fixTypesAndSymbols(tree: Tree): Tree = {
     val definedTypeSymbols = (tree collect {
@@ -407,10 +392,7 @@ class ReTyper[+C <: Context](val c: C) {
     }
 
     def hasNonRepresentableType(trees: List[Tree]) = trees exists { tree =>
-      tree.tpe != null && (tree.tpe exists {
-        case TypeRef(NoPrefix, name, List()) => name.toString endsWith ".type"
-        case _ => false
-      })
+      tree.tpe != null && (tree.tpe exists isNonRepresentableType)
     }
 
     object typesAndSymbolsFixer extends Transformer {
@@ -459,24 +441,6 @@ class ReTyper[+C <: Context](val c: C) {
             tree.symbol,
             tree.tpe,
             if (tree.symbol.pos != NoPosition) tree.symbol.pos else tree.pos)
-
-        case ValDef(mods, name, tpt, rhs) =>
-          val typeTree = tpt match {
-            case tree: TypeTree
-              if !(mods hasFlag SYNTHETIC) &&
-                 !(mods hasFlag LAZY) &&
-                 !rhs.isEmpty &&
-                 tree.original == null =>
-              TypeTree()
-            case tree =>
-              transform(tree)
-          }
-
-          val valDef = ValDef(
-            transformModifiers(mods), name, typeTree,
-            transform(rhs))
-
-          valDef withAttrs (tree.symbol, tree.tpe, tree.pos)
 
         case TypeApply(fun, targs) =>
           if (hasNonRepresentableType(targs))
