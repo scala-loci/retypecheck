@@ -442,6 +442,37 @@ class ReTyper[+C <: Context](val c: C) {
             tree.tpe,
             if (tree.symbol.pos != NoPosition) tree.symbol.pos else tree.pos)
 
+        case DefDef(mods, name, tparams, vparamss, tpt, EmptyTree) =>
+          val typeSignature = tree.symbol.typeSignature
+          val emptyTypeTree = tpt match {
+            case tree: TypeTree => tree.tpe == null && tree.original == null
+            case EmptyTree => true
+            case _ => false
+          }
+          if (emptyTypeTree && typeSignature != null && typeSignature != NoType)
+            (DefDef(
+                transformModifiers(mods), name,
+                transformTypeDefs(tparams), transformValDefss(vparamss),
+                TypeTree(tree.symbol.typeSignature.finalResultType), EmptyTree)
+              withAttrs (tree.symbol, tree.tpe, tree.pos))
+          else
+            super.transform(tree)
+
+        case ValDef(mods, name, tpt, EmptyTree) =>
+          val typeSignature = tree.symbol.typeSignature
+          val emptyTypeTree = tpt match {
+            case tree: TypeTree => tree.tpe == null && tree.original == null
+            case EmptyTree => true
+            case _ => false
+          }
+          if (emptyTypeTree && typeSignature != null && typeSignature != NoType)
+            (ValDef(
+                transformModifiers(mods), name,
+                TypeTree(tree.symbol.typeSignature.finalResultType), EmptyTree)
+              withAttrs (tree.symbol, tree.tpe, tree.pos))
+          else
+            super.transform(tree)
+
         case TypeApply(fun, targs) =>
           if (hasNonRepresentableType(targs))
             transform(fun)
