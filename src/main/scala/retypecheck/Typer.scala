@@ -42,7 +42,12 @@ class ReTyper[+C <: Context](val c: C) {
    * [[https://issues.scala-lang.org/browse/SI-5464 SI-5464]].
    */
   def typecheck(tree: Tree): Tree =
-    try fixTypecheck(selfReferenceFixer transform (c typecheck tree))
+    try {
+      val typecheckedTree = if (tree.tpe != null) tree else c typecheck tree
+      assignMissingTypes(
+        fixTypecheck(
+          selfReferenceFixer transform typecheckedTree))
+    }
     catch {
       case TypecheckException(pos, msg) =>
         c.abort(pos.asInstanceOf[Position], msg)
@@ -325,6 +330,116 @@ class ReTyper[+C <: Context](val c: C) {
     }
 
     expandType(tpe)
+  }
+
+
+  private def assignMissingTypes(tree: Tree): tree.type = {
+    def typeDef(tree: TypeDef, symbol: TypeSymbol): Unit = {
+      if (tree.tparams.size == symbol.typeParams.size)
+        (tree.tparams zip symbol.typeParams) foreach { case (tree, symbol) =>
+          if (tree.name == symbol.name)
+            typeDef(tree, symbol.asType)
+        }
+
+      if (tree.rhs.tpe == null)
+        internal.setType(tree.rhs, symbol.typeSignature)
+    }
+
+    def valDef(tree: ValDef, symbol: TermSymbol): Unit = {
+      if (tree.tpt.tpe == null)
+        internal.setType(tree.tpt, symbol.typeSignature.finalResultType)
+    }
+
+    def defDef(tree: DefDef, symbol: MethodSymbol): Unit = {
+      val method = symbol.asMethod
+
+      if (tree.tparams.size == method.typeParams.size)
+        (tree.tparams zip method.typeParams) foreach { case (tree, symbol) =>
+          if (tree.name == symbol.name)
+            typeDef(tree, symbol.asType)
+        }
+
+      if (tree.vparamss.size == method.paramLists.size)
+        (tree.vparamss zip method.paramLists) foreach { case (trees, symbols) =>
+          (trees zip symbols) foreach { case (tree, symbol) =>
+            if (tree.name == symbol.name)
+              valDef(tree, symbol.asTerm)
+          }
+        }
+
+      if (tree.tpt.tpe == null)
+        internal.setType(tree.tpt, symbol.typeSignature.finalResultType)
+    }
+
+    def members(trees: Iterable[Tree], symbols: Iterable[Symbol]): Unit =
+      if (trees.size == symbols.size)
+        (trees zip symbols) foreach {
+          case (tree: TypeDef, symbol)
+              if symbol.isType && tree.name == symbol.name =>
+            typeDef(tree, symbol.asType)
+          case (tree: ValDef, symbol)
+              if symbol.isTerm && tree.name == symbol.name =>
+            valDef(tree, symbol.asTerm)
+          case (tree: DefDef, symbol)
+              if symbol.isMethod && tree.name == symbol.name =>
+            defDef(tree, symbol.asMethod)
+          case _ =>
+        }
+
+    object traverser extends Traverser {
+      override def traverse(tree: Tree): Unit = {
+        (tree, tree.tpe) match {
+          case (tree: TypeTree, tpe) if tree.original != null =>
+            if (tree.original.tpe == null)
+              internal.setType(tree.original, tpe)
+            traverse(tree.original)
+
+          case (CompoundTypeTree(Template(parents, _, body)),
+                RefinedType(parentTypes, decls)) =>
+            members(body, decls)
+            if (parents.size == parentTypes.size)
+              (parents zip parentTypes) foreach { case (tree, tpe) =>
+                if (tree.tpe == null)
+                  internal.setType(tree, tpe)
+              }
+
+          case (ExistentialTypeTree(tpt, whereClauses),
+                ExistentialType(quantified, underlying)) =>
+            members(whereClauses, quantified)
+            if (tpt.tpe == null)
+              internal.setType(tpt, underlying)
+
+          case (TypeBoundsTree(lo, hi),
+                TypeBounds(loType, hiType)) =>
+            if (lo.tpe == null)
+              internal.setType(lo, loType)
+            if (hi.tpe == null)
+              internal.setType(hi, hiType)
+
+          case (AppliedTypeTree(tpt, args),
+                TypeRef(pre, sym, typeArgs)) =>
+            if (args.size == typeArgs.size)
+              (args zip typeArgs) foreach { case (tree, tpe) =>
+                if (tree.tpe == null)
+                  internal.setType(tree, tpe)
+              }
+            if (tpt.tpe == null)
+              internal.setType(tpt, internal.typeRef(pre, sym, List.empty))
+
+          case (Select(qualifier, _),
+                TypeRef(pre, _, _)) if qualifier.tpe == null =>
+            internal.setType(qualifier, pre)
+
+          case _ =>
+        }
+
+        super.traverse(tree)
+      }
+    }
+
+    traverser traverse tree
+
+    tree
   }
 
 
