@@ -477,14 +477,31 @@ class ReTyper[+C <: Context](val c: C) {
 
 
   private def fixTypesAndSymbols(tree: Tree): Tree = {
-    val definedTypeSymbols = (tree collect {
-      case tree @ TypeDef(_, _, _, _) if tree.symbol.isType =>
-        tree.symbol
-      case tree @ ClassDef(_, _, _, _) if tree.symbol.isClass =>
-        tree.symbol
-      case tree @ ModuleDef(_, _, _) if tree.symbol.isModule =>
-        tree.symbol.asModule.moduleClass
-    }).toSet
+    val definedTypeSymbols = {
+      var symbols = Set.empty[TypeSymbol]
+
+      var currentSymbols = (tree collect {
+        case tree @ TypeDef(_, _, _, _) if tree.symbol.isType =>
+          tree.symbol.asType
+        case tree @ ClassDef(_, _, _, _) if tree.symbol.isClass =>
+          tree.symbol.asType
+        case tree @ ModuleDef(_, _, _) if tree.symbol.isModule =>
+          tree.symbol.asModule.moduleClass.asType
+      }).toSet
+
+      var foundAdditionals = true
+      while (foundAdditionals) {
+        symbols ++= currentSymbols
+        currentSymbols = (currentSymbols map {
+          _.toType.members collect {
+            case symbol if symbol.isType => symbol.asType
+          }
+        }).flatten
+        foundAdditionals = (currentSymbols -- symbols).nonEmpty
+      }
+
+      symbols
+    }
 
     val owners = ownerChain(c.internal.enclosingOwner)
 
@@ -502,8 +519,9 @@ class ReTyper[+C <: Context](val c: C) {
         tree
     }
 
-    def isTypeUnderExpansion(tpe: Type) = tpe exists {
-      definedTypeSymbols contains _.typeSymbol
+    def isTypeUnderExpansion(tpe: Type) = tpe exists { tpe =>
+      val symbol = tpe.typeSymbol
+      symbol.isType && (definedTypeSymbols contains symbol.asType)
     }
 
     def hasNonRepresentableType(trees: List[Tree]) = trees exists { tree =>
