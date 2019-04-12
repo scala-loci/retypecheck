@@ -510,6 +510,8 @@ class ReTyper[+C <: Context](val c: C) {
     val classNestingList =
       mutable.ListBuffer((owners.reverse map { _.name.toTypeName }): _*)
 
+    val shadowedNames = mutable.ListBuffer.empty[Set[Name]]
+
     def prependRootPackage(tree: Tree): Tree = tree match {
       case Ident(name) if tree.symbol.owner == c.mirror.RootClass =>
         Select(Ident(termNames.ROOTPKG), name)
@@ -529,6 +531,21 @@ class ReTyper[+C <: Context](val c: C) {
     }
 
     object typesAndSymbolsFixer extends Transformer {
+      def templateNames(impl: Template) = {
+        (impl.parents flatMap { parent =>
+          if (parent.symbol != null && parent.symbol.isType)
+            parent.symbol.asType.toType.members collect {
+              case symbol if symbol.isTerm => symbol.name
+            }
+          else
+            Iterable.empty
+        }) ++
+        (impl.body collect {
+          case defTree: DefTree if defTree.isTerm => defTree.name
+        }) ++
+        (if (impl.self.name != termNames.EMPTY) Some(impl.self.name) else None)
+      }.toSet
+
       override def transform(tree: Tree) = tree match {
         case tree: TypeTree =>
           if (tree.original != null)
@@ -538,12 +555,16 @@ class ReTyper[+C <: Context](val c: C) {
           else
             TypeTree(tree.tpe)
 
-        case ClassDef(_, tpname, _, _) =>
+        case ClassDef(_, tpname, _, impl) =>
           classNestingList prepend tpname
           if (tree.symbol.isClass)
             classNestingSet += tree.symbol
 
+          shadowedNames prepend templateNames(impl)
+
           val classDef = super.transform(tree)
+
+          shadowedNames remove 0
 
           if (tree.symbol.isClass)
             classNestingSet -= tree.symbol
@@ -551,12 +572,16 @@ class ReTyper[+C <: Context](val c: C) {
 
           classDef
 
-        case ModuleDef(_, tname, _) =>
+        case ModuleDef(_, tname, impl) =>
           classNestingList prepend tname.toTypeName
           if (tree.symbol.isModule)
             classNestingSet += tree.symbol.asModule.moduleClass
 
+          shadowedNames prepend templateNames(impl)
+
           val moduleDef = super.transform(tree)
+
+          shadowedNames remove 0
 
           if (tree.symbol.isModule)
             classNestingSet -= tree.symbol.asModule.moduleClass
@@ -565,10 +590,14 @@ class ReTyper[+C <: Context](val c: C) {
           moduleDef
 
         case DefDef(mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt, rhs) =>
+          shadowedNames prepend (vparamss.flatten map { _.name }).toSet
+
           val defDef = DefDef(
             transformModifiers(mods), termNames.CONSTRUCTOR,
             transformTypeDefs(tparams), transformValDefss(vparamss),
             TypeTree(), transform(rhs))
+
+          shadowedNames remove 0
 
           defDef withAttrs (
             tree.symbol,
@@ -582,14 +611,21 @@ class ReTyper[+C <: Context](val c: C) {
             case EmptyTree => true
             case _ => false
           }
-          if (emptyTypeTree && typeSignature != null && typeSignature != NoType)
-            (DefDef(
-                transformModifiers(mods), name,
-                transformTypeDefs(tparams), transformValDefss(vparamss),
-                TypeTree(tree.symbol.typeSignature.finalResultType), EmptyTree)
-              withAttrs (tree.symbol, tree.tpe, tree.pos))
-          else
-            super.transform(tree)
+
+          shadowedNames prepend (vparamss.flatten map { _.name }).toSet + name
+
+          val defDef =
+            if (emptyTypeTree && typeSignature != null && typeSignature != NoType)
+              (DefDef(
+                  transformModifiers(mods), name,
+                  transformTypeDefs(tparams), transformValDefss(vparamss),
+                  TypeTree(tree.symbol.typeSignature.finalResultType), EmptyTree)
+                withAttrs (tree.symbol, tree.tpe, tree.pos))
+            else
+              super.transform(tree)
+
+          shadowedNames remove 0
+          defDef
 
         case ValDef(mods, name, tpt, EmptyTree) =>
           val typeSignature = tree.symbol.typeSignature
@@ -598,13 +634,43 @@ class ReTyper[+C <: Context](val c: C) {
             case EmptyTree => true
             case _ => false
           }
-          if (emptyTypeTree && typeSignature != null && typeSignature != NoType)
-            (ValDef(
-                transformModifiers(mods), name,
-                TypeTree(tree.symbol.typeSignature.finalResultType), EmptyTree)
-              withAttrs (tree.symbol, tree.tpe, tree.pos))
-          else
-            super.transform(tree)
+
+          shadowedNames prepend Set(name)
+
+          val result =
+            if (emptyTypeTree && typeSignature != null && typeSignature != NoType)
+              (ValDef(
+                  transformModifiers(mods), name,
+                  TypeTree(tree.symbol.typeSignature.finalResultType), EmptyTree)
+                withAttrs (tree.symbol, tree.tpe, tree.pos))
+            else
+              super.transform(tree)
+
+          shadowedNames remove 0
+          result
+
+        case _: ValDef | _: DefDef | _: CaseDef | _: Function | _: Block =>
+          val names = tree match {
+            case ValDef(_, name, _, _) =>
+              List(name)
+            case DefDef(_, name, _, vparamss, _, _) =>
+              name :: (vparamss.flatten map { _.name })
+            case CaseDef(pat, _, _) =>
+              pat collect { case Bind(name, _) => name }
+            case Function(vparams, _) =>
+              vparams map { _.name }
+            case Block(stats, _) =>
+              stats collect {
+                case defTree: DefTree if defTree.isTerm => defTree.name
+              }
+          }
+
+          shadowedNames prepend names.toSet
+
+          val result = super.transform(tree)
+
+          shadowedNames remove 0
+          result
 
         case TypeApply(fun, targs) =>
           if (hasNonRepresentableType(targs))
@@ -638,7 +704,8 @@ class ReTyper[+C <: Context](val c: C) {
 
         case Select(qualifier @ This(qual), name) =>
           val fixedEnclosingSelfReference =
-            if (!qualifier.symbol.isModuleClass)
+            if (!qualifier.symbol.isModuleClass &&
+                !(shadowedNames exists { _ contains name }))
               classNestingList collectFirst {
                 case outerName if outerName == qualifier.symbol.name =>
                   Ident(name)
@@ -846,20 +913,31 @@ class ReTyper[+C <: Context](val c: C) {
 
         stack prepend Left((symbol, implDef.name.toTypeName, names.toSet, self))
 
-        val tree = super.transform(implDef)
-        stack remove 0
-        tree
+        val result = super.transform(implDef)
 
-      case block: Block =>
-        val names = block.stats collect {
-          case defTree: DefTree => defTree.name
+        stack remove 0
+        result
+
+      case _: ValDef | _: DefDef | _: CaseDef | _: Function | _: Block =>
+        val names = tree match {
+          case ValDef(_, name, _, _) =>
+            List(name)
+          case DefDef(_, name, _, vparamss, _, _) =>
+            name :: (vparamss.flatten map { _.name })
+          case CaseDef(pat, _, _) =>
+            pat collect { case Bind(name, _) => name }
+          case Function(vparams, _) =>
+            vparams map { _.name }
+          case Block(stats, _) =>
+            stats collect { case defTree: DefTree => defTree.name }
         }
 
         stack prepend Right(names.toSet)
 
-        val tree = super.transform(block)
+        val result = super.transform(tree)
+
         stack remove 0
-        tree
+        result
 
       case Select(thisTree @ This(thisName), selectedName) =>
         trait Modification
