@@ -138,6 +138,11 @@ class ReTyper[+C <: Context](val c: C) {
       if (pre != NoPrefix) {
         val preTree = expandType(pre)
 
+        val preSymbolSingle = pre match {
+          case SingleType(_, sym) => sym
+          case _ => pre.typeSymbol
+        }
+
         val prePathTree = preTree match {
           case SingletonTypeTree(Select(qualifier, name)) =>
             Some(Select(qualifier, name.toTermName))
@@ -165,7 +170,7 @@ class ReTyper[+C <: Context](val c: C) {
               tree withAttrs (sym, sym.typeSignature, pos)
             }
             else
-              tree withAttrs (pre.typeSymbol, pre, pos)
+              tree withAttrs (preSymbolSingle, pre, pos)
 
           case _ =>
             preTree
@@ -175,12 +180,11 @@ class ReTyper[+C <: Context](val c: C) {
           case This(_) =>
             false
           case _ =>
-            val preSymbol = pre.typeSymbol
-            preSymbol.isType &&
-              !preSymbol.isModule &&
-              !preSymbol.isModuleClass &&
-              !preSymbol.isPackage &&
-              !preSymbol.isPackageClass &&
+            preSymbolSingle.isType &&
+              !preSymbolSingle.isModule &&
+              !preSymbolSingle.isModuleClass &&
+              !preSymbolSingle.isPackage &&
+              !preSymbolSingle.isPackageClass &&
               sym.isType
         }
 
@@ -194,13 +198,17 @@ class ReTyper[+C <: Context](val c: C) {
 
     def expandType(tpe: Type): Tree = {
       val tree = tpe match {
-        case ThisType(pre) if pre.isType && !pre.isModule && !pre.isPackage =>
+        case ThisType(pre)
+            if pre.isType && !pre.isModule && !pre.isPackage &&
+               pre.name.toString != "<refinement>" =>
           This(pre.asType.name) withAttrs (tpe.typeSymbol, tpe, pos)
 
-        case ThisType(pre) if isAccessible(pre, allOwners) =>
+        case ThisType(pre)
+            if isAccessible(pre, allOwners) &&
+               pre.name.toString != "<refinement>" =>
           expandSymbol(pre, pos)
 
-        case TypeRef(pre, sym, args) =>
+        case TypeRef(pre, sym, args) if sym.name.toString != "<refinement>" =>
           val prefix = expandPrefix(pre, sym)
           val symbol = if (isNonRepresentableType(tpe)) NoSymbol else sym
           if (!args.isEmpty)
@@ -212,7 +220,7 @@ class ReTyper[+C <: Context](val c: C) {
           else
             prefix withAttrs (symbol, tpe, pos)
 
-        case SingleType(pre, sym) =>
+        case SingleType(pre, sym) if sym.name.toString != "<refinement>" =>
           expandPrefix(pre, sym) match {
             case Select(prefix, termNames.PACKAGE) if pre.typeSymbol.isPackage =>
               prefix
