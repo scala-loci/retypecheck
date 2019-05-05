@@ -1059,8 +1059,23 @@ class ReTyper[+C <: Context](val c: C) {
     val rhss = (tree collect {
       case valDef @ ValDef(_, _, _, _) if valDef.symbol.isTerm =>
         val term = valDef.symbol.asTerm
-        List(term.getterOrNoSymbol -> valDef, term.setterOrNoSymbol -> valDef)
-    }).flatten.toMap - NoSymbol
+        val getter = term.getterOrNoSymbol
+        val setter = term.setterOrNoSymbol
+
+        val getterDef =
+          if (getter != NoSymbol && getter != term)
+            List(getter -> valDef)
+          else
+            List.empty
+
+        val setterDef =
+          if (setter != NoSymbol && setter != term)
+            List(setter -> valDef)
+          else
+            List.empty
+
+        getterDef ++ setterDef
+    }).flatten.toMap
 
     def defaultArgDef(defDef: DefDef): Boolean = {
       val nameString = defDef.name.toString
@@ -1218,14 +1233,24 @@ class ReTyper[+C <: Context](val c: C) {
               val term = tree.symbol.asTerm
               !term.isLazy && term.isGetter
             } =>
+          val term = tree.symbol.asTerm
           val valDef = rhss get tree.symbol getOrElse defDef
           val valAnnotations = (rhss get tree.symbol).toList flatMap {
             _.symbol.annotations }
           val newMods = Modifiers(
             mods.flags
+              | (if (valDef.mods hasFlag PRESUPER) PRESUPER else NoFlags)
               | (if (!valDef.symbol.asTerm.isStable) MUTABLE else NoFlags)
-              | (if (valDef.mods hasFlag PRESUPER) PRESUPER else NoFlags),
-            mods.privateWithin,
+              | (if (term.isPrivate) PRIVATE else NoFlags)
+              | (if (term.isProtected) PROTECTED else NoFlags)
+              | (if (term.isPrivateThis ||
+                     term.isProtectedThis) LOCAL else NoFlags),
+            if (mods.privateWithin != typeNames.EMPTY)
+              mods.privateWithin
+            else if (defDef.symbol.privateWithin != NoSymbol)
+              defDef.symbol.privateWithin.name
+            else
+              typeNames.EMPTY,
             mods.annotations)
           val newValDef = ValDef(
             fixModifiers(newMods, defDef.symbol, valAnnotations),
@@ -1249,8 +1274,17 @@ class ReTyper[+C <: Context](val c: C) {
           val typeTree = valDef map { _.tpt } getOrElse valOrDefDef.tpt
           val valAnnotations = lazyValAnnotations ++ 
             (valDef.toList flatMap { _.symbol.annotations })
+          val newMods = Modifiers(
+            mods.flags,
+            if (mods.privateWithin != typeNames.EMPTY)
+              mods.privateWithin
+            else if (valOrDefDef.symbol.privateWithin != NoSymbol)
+              valOrDefDef.symbol.privateWithin.name
+            else
+              typeNames.EMPTY,
+            mods.annotations)
           val newValDef = ValDef(
-            fixModifiers(mods, valOrDefDef.symbol, valAnnotations),
+            fixModifiers(newMods, valOrDefDef.symbol, valAnnotations),
             valOrDefDef.name, transform(typeTree), transform(assignment))
           newValDef withAttrs (
             valOrDefDef.symbol,
