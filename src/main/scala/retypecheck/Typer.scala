@@ -1031,6 +1031,14 @@ class ReTyper[+C <: Context](val c: C) {
       internal setPos (
         internal setType (
           internal setSymbol (tree, symbol), tpe), pos)
+    def equalsTypedStructure(other: Tree) =
+      (tree equalsStructure other) &&
+      ((tree collect { case tree: TypeTree => tree }).zipAll
+       (other collect { case tree: TypeTree => tree }, null, null)
+       forall { case (tree, other) =>
+         tree != null && other != null &&
+          (tree.tpe != null && tree.tpe =:= other.tpe || other.tpe == null)
+       })
   }
 
   private implicit class TermOps(term: TermSymbol) {
@@ -1134,7 +1142,7 @@ class ReTyper[+C <: Context](val c: C) {
            (annotations map { _.tree }))
             .foldLeft(List.empty[Tree]) { (all, tree) =>
               val transformedTree = transform(tree)
-              if (all exists { _ equalsStructure transformedTree })
+              if (all exists { _ equalsTypedStructure transformedTree })
                 all
               else
                 transformedTree :: all
@@ -1339,7 +1347,8 @@ class ReTyper[+C <: Context](val c: C) {
               super.transform(tree)
 
             case Annotated(annot, arg)
-                if expr != null && arg != null && (expr equalsStructure arg) =>
+                if expr != null && arg != null &&
+                   (expr equalsTypedStructure arg) =>
               super.transform(tpt)
 
             case tpt: TypeTree
