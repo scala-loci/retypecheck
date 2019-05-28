@@ -535,6 +535,19 @@ class ReTyper[+C <: Context](val c: C) {
     }
 
     def hasNonRepresentableType(trees: List[Tree]) = trees exists { tree =>
+      val isWildcardType = tree match {
+        case tree: TypeTree
+            if tree.tpe != null &&
+               tree.original == null &&
+               tree.symbol.isType &&
+               tree.symbol.asType.isExistential =>
+          val str = tree.tpe.toString
+          str == "_" || (str startsWith "_$")
+        case _ =>
+          false
+      }
+
+      isWildcardType ||
       tree.tpe != null && (tree.tpe exists isNonRepresentableType)
     }
 
