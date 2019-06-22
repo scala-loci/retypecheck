@@ -1191,8 +1191,49 @@ class ReTyper[+C <: Context](val c: C) {
             applyMetaProperties(
               tree, Template(parents, self, processDefaultArgs(body))))
 
-        case Block(stats, expr) =>
-          val block = processDefaultArgs(expr :: stats)
+        case tree @ Block(stats, expr) =>
+          val defaultArgStats = stats map {
+            case tree @ ValDef(mods, name, tpt, rhs)
+                if (mods hasFlag ARTIFACT) &&
+                   !(name.toString startsWith "default$") =>
+              val defaultName = TermName(s"default$$$name")
+              val valDef = ValDef(mods, defaultName, tpt, rhs) withAttrs (
+                tree.symbol, tree.tpe, tree.pos)
+              Some(valDef -> (name -> tree.symbol -> defaultName))
+            case _ =>
+              None
+          }
+
+          val renamedDefaultArgs =
+            if (!(defaultArgStats contains None)) {
+              val names = (defaultArgStats collect {
+                case Some((_, mapping)) => mapping
+              }).toMap
+
+              object transformer extends Transformer {
+                override def transform(tree: Tree) = tree match {
+                  case tree @ Ident(name: TermName) =>
+                    val defaultName =
+                      names get (name -> tree.symbol) getOrElse name
+                    Ident(defaultName) withAttrs (
+                      tree.symbol, tree.tpe, tree.pos)
+                  case tree =>
+                    super.transform(tree)
+                }
+              }
+
+              Block(
+                defaultArgStats collect { case Some((stat, _)) =>
+                  transformer transform stat
+                },
+                transformer transform expr)
+            }
+            else
+              tree
+
+          val block = processDefaultArgs(
+            renamedDefaultArgs.expr :: renamedDefaultArgs.stats)
+
           super.transform(
             applyMetaProperties(tree, Block(block.tail, block.head)))
 
