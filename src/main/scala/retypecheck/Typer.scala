@@ -209,23 +209,27 @@ class ReTyper[+C <: Context](val c: C) {
           expandSymbol(pre, pos)
 
         case TypeRef(pre, sym, args) if sym.name.toString != "<refinement>" =>
-          val prefix = expandPrefix(pre, sym)
-          val symbol = if (isNonRepresentableType(tpe)) NoSymbol else sym
+          val module = if (sym.isModuleClass) sym.asClass.module else sym
+          val prefix = expandPrefix(pre, module)
+          val symbol = if (isNonRepresentableType(tpe)) NoSymbol else module
           if (!args.isEmpty)
             AppliedTypeTree(
                 prefix withAttrs (
                   symbol, internal typeRef (pre, sym, List.empty), pos),
                 args map expandType) withAttrs (
               symbol, tpe, pos)
+          else if (sym.isModuleClass)
+            SingletonTypeTree(prefix withAttrs (symbol, tpe, pos))
           else
             prefix withAttrs (symbol, tpe, pos)
 
         case SingleType(pre, sym) if sym.name.toString != "<refinement>" =>
-          expandPrefix(pre, sym) match {
+          val module = if (sym.isModuleClass) sym.asClass.module else sym
+          expandPrefix(pre, module) match {
             case Select(prefix, termNames.PACKAGE) if pre.typeSymbol.isPackage =>
               prefix
             case prefix =>
-              SingletonTypeTree(prefix withAttrs (sym, tpe, pos))
+              SingletonTypeTree(prefix withAttrs (module, tpe, pos))
           }
 
         case TypeBounds(lo, hi) =>
@@ -699,6 +703,19 @@ class ReTyper[+C <: Context](val c: C) {
           else
             super.transform(tree)
 
+        case Apply(
+              typeApply @ TypeApply(
+                select @ Select(qual, TermName(name)),
+                List(targ)),
+              List())
+            if name == "$" + "isInstanceOf" =>
+          super.transform(
+            TypeApply(
+                Select(qual, TermName("isInstanceOf")) withAttrs (
+                  select.symbol, select.tpe, select.pos),
+                List(targ)) withAttrs (
+              typeApply.symbol, typeApply.tpe, typeApply.pos))
+
         case Apply(fun, args)
             if tree.symbol != null && tree.symbol.isMethod && {
               val paramLists = tree.symbol.asMethod.paramLists
@@ -764,9 +781,21 @@ class ReTyper[+C <: Context](val c: C) {
 
     val symbols = mutable.Set.empty[Symbol]
 
-    val syntheticMethodNames = Set("apply", "canEqual", "copy", "equals",
-      "hashCode", "productArity", "productElement", "productIterator",
-      "productPrefix", "readResolve", "toString", "unapply")
+    val scala213 = c.classPath exists { url =>
+      val file = url.getFile
+      val index = file indexOf "/scala-library-"
+      val start = index + 15
+      val end = index + 19
+      index != -1 && end <= file.length && ((file substring (start, end)) == "2.13")
+    }
+
+    val syntheticMethodNames =
+      if (scala213)
+        Set("apply", "unapply")
+      else
+        Set("apply", "canEqual", "copy", "equals",
+            "hashCode", "productArity", "productElement", "productIterator",
+            "productPrefix", "readResolve", "toString", "unapply")
 
     def isSyntheticMethodName(name: TermName) =
       (syntheticMethodNames contains name.toString) ||
@@ -832,7 +861,7 @@ class ReTyper[+C <: Context](val c: C) {
         case Template(parents, self, body) =>
           super.transform(Template(parents, self, fixCaseClasses(body)))
         case Block(stats, expr) =>
-          val fixedExpr :: fixedStats = fixCaseClasses(expr :: stats)
+          val fixedExpr :: fixedStats = fixCaseClasses(expr :: stats): @unchecked
           super.transform(Block(fixedStats, fixedExpr))
         case _ =>
           super.transform(tree)
