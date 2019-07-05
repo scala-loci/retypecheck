@@ -4,7 +4,7 @@ git.useGitDescribe in ThisBuild := true
 
 name in ThisBuild := "retypecheck"
 
-scalaVersion in ThisBuild := "2.12.6"
+scalaVersion in ThisBuild := "2.12.8"
 
 organization in ThisBuild := "de.tuda.stg"
 
@@ -19,9 +19,9 @@ val dependencies = libraryDependencies ++= Seq(
 
 val dependenciesTest = libraryDependencies ++= Seq(
   "com.chuusai" %% "shapeless" % "2.3.3" % "test",
-  "org.parboiled" %% "parboiled" % "2.1.4",
+  "org.parboiled" %% "parboiled" % "2.1.7",
   "org.scala-lang.modules" %% "scala-async" % "0.9.7" % "test",
-  "org.scalatest" %% "scalatest" % "3.0.5" % "test")
+  "org.scalatest" %% "scalatest" % "3.0.8" % "test")
 
 val macroparadise = addCompilerPlugin(
   "org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.patch)
@@ -36,16 +36,16 @@ def projectWithBaseSrc(project: Project) = project settings (
   unmanagedResourceDirectories in Test += base.value / "src" / "test" / "resources")
 
 def mainProject(project: Project) = projectWithBaseSrc(project) settings (
-  scalaVersion := "2.12.6",
-  crossScalaVersions := Seq("2.11.12", "2.12.6"),
+  scalaVersion := "2.12.8",
+  crossScalaVersions := Seq("2.11.12", "2.12.8"),
   dependencies)
 
 def testProject(project: Project) = projectWithBaseSrc(project) settings (
   skip in publish := true,
-  scalaVersion := "2.12.6",
+  scalaVersion := "2.12.8",
   crossScalaVersions := Seq(
     "2.11.6", "2.11.7", "2.11.8", "2.11.9", "2.11.10", "2.11.11", "2.11.12",
-    "2.12.0", "2.12.1", "2.12.2", "2.12.3", "2.12.4", "2.12.5", "2.12.6"),
+    "2.12.0", "2.12.1", "2.12.2", "2.12.3", "2.12.4", "2.12.5", "2.12.6", "2.12.7", "2.12.8"),
   dependencies,
   dependenciesTest)
 
