@@ -157,6 +157,9 @@ class ReTyper[+C <: Context](val c: C) {
         }
 
         val pathTree = prePathTree match {
+          case Some(Select(tree, termNames.PACKAGE)) if tree.symbol.isPackage =>
+            tree
+
           case Some(tree) =>
             val preSymbol = pre.typeSymbol
             if (preSymbol.isModuleClass) {
