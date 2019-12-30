@@ -536,9 +536,31 @@ class ReTyper[+C <: Context](val c: C) {
         tree
     }
 
-    def isTypeUnderExpansion(tpe: Type) = tpe exists { tpe =>
-      val symbol = tpe.typeSymbol
-      symbol.isType && (definedTypeSymbols contains symbol.asType)
+    def isTypeUnderExpansion(tpe: Type) = {
+      val tpes = mutable.ListBuffer(tpe)
+      val seen = mutable.Set.empty[Type]
+      var underExpansion = false
+
+      while (!underExpansion && tpes.nonEmpty)
+        tpes remove 0 exists { tpe =>
+          if (!(seen contains tpe)) {
+            if (!(definedTypeSymbols exists { tpe contains _ })) {
+              seen += tpe
+              val dealias = tpe.dealias
+              val widen = tpe.widen
+              if (tpe ne dealias)
+                tpes += dealias
+              if (tpe ne widen)
+                tpes += widen
+            }
+            else
+              underExpansion = true
+          }
+
+          underExpansion
+        }
+
+      underExpansion
     }
 
     def hasNonRepresentableType(trees: List[Tree]) = trees exists { tree =>
@@ -578,9 +600,20 @@ class ReTyper[+C <: Context](val c: C) {
         case tree: TypeTree =>
           if (tree.original != null)
             transform(prependRootPackage(tree.original))
-          else if (tree.tpe != null && isTypeUnderExpansion(tree.tpe))
-            createTypeTree(tree.tpe, tree.pos, classNestingSet)
-          else
+          else if (tree.tpe != null && isTypeUnderExpansion(tree.tpe)) {
+            val typeTree = createTypeTree(tree.tpe, tree.pos, classNestingSet)
+
+            val hasNonRepresentableType = typeTree exists {
+              case tree: TypeTree => true
+              case _ => false
+            }
+
+            if (hasNonRepresentableType)
+              TypeTree()
+            else
+              typeTree
+          }
+          else 
             TypeTree(tree.tpe)
 
         case ClassDef(_, tpname, _, impl) =>
