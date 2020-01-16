@@ -1439,6 +1439,14 @@ class ReTyper[+C <: Context](val c: C) {
         // fix classes
         case classDef @ ClassDef(mods, name, tparams, impl)
             if tree.symbol.isClass =>
+          impl.body exists {
+            case tree if tree.symbol != null && tree.symbol.isConstructor =>
+              internal setPos (tree, classDef.pos)
+              true
+            case _ =>
+              false
+          }
+
           val newClassDef = ClassDef(
             fixModifiers(mods, classDef.symbol), name,
             transformTypeDefs(tparams),
@@ -1465,6 +1473,12 @@ class ReTyper[+C <: Context](val c: C) {
         case _ =>
           super.transform(tree)
       }
+    }
+
+    tree match {
+      case _: ImplDef if tree.pos == NoPosition =>
+        internal setPos (tree, c.enclosingPosition)
+      case _ =>
     }
 
     typecheckFixer transform tree
