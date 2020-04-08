@@ -2,6 +2,7 @@ package retypecheck
 
 import org.scalamacros.resetallattrs._
 import scala.collection.mutable
+import scala.reflect.internal.util
 import scala.reflect.macros.blackbox.Context
 import scala.reflect.macros.TypecheckException
 
@@ -45,12 +46,15 @@ class ReTyper[+C <: Context](val c: C) {
     try {
       val typecheckedTree = if (tree.tpe != null) tree else c typecheck tree
       assignMissingTypes(
-        fixTypecheck(
-          selfReferenceFixer transform typecheckedTree))
+        maskUnusedImports(
+          fixTypecheck(
+            selfReferenceFixer transform typecheckedTree)))
     }
     catch {
-      case TypecheckException(pos, msg) =>
-        c.abort(pos.asInstanceOf[Position], msg)
+      case TypecheckException(pos: Position @unchecked, msg) =>
+        c.abort(pos, msg)
+      case TypecheckException(_, msg) =>
+        c.abort(c.enclosingPosition, msg)
     }
 
   /**
@@ -67,9 +71,10 @@ class ReTyper[+C <: Context](val c: C) {
   def untypecheck(tree: Tree): Tree =
     fixUntypecheck(
       c untypecheck
-        fixTypesAndSymbols(
-          fixCaseClasses(
-            fixTypecheck(tree))))
+        maskUnusedImports(
+          fixTypesAndSymbols(
+            fixCaseClasses(
+              fixTypecheck(tree)))))
 
   /**
    * Un-type-checks the given tree resetting all symbols using the
@@ -1482,6 +1487,154 @@ class ReTyper[+C <: Context](val c: C) {
     }
 
     typecheckFixer transform tree
+  }
+
+  private class UndefinedOffsetPosition(
+    override val source: util.SourceFile,
+    override val point: Int)
+      extends util.Position {
+    override val start = point
+    override val end = point
+  }
+
+  private class UndefinedPosition extends util.Position {
+    override def source = util.NoSourceFile
+    override def point = fail("start")
+    override def start = fail("point")
+    override def end = fail("end")
+  }
+
+  private def maskUnusedImports(tree: Tree): Tree = {
+    def maskPosition(tree: Tree) = {
+      val pos =
+        if (tree.pos != NoPosition)
+          new UndefinedOffsetPosition(tree.pos.source, tree.pos.point)
+        else
+          new UndefinedPosition
+
+      pos match {
+        case pos: Position => internal setPos (tree, pos)
+        case _ => tree
+      }
+    }
+
+    def isPositionMasked(tree: Tree) = tree.pos match {
+      case (_: UndefinedOffsetPosition) | (_: UndefinedPosition) => true
+      case _ => false
+    }
+
+    object importMasker extends Traverser {
+      type Imports = List[List[(Tree, Set[Symbol])]]
+
+      var imports: Imports = List(List.empty)
+      var hasImports = false
+
+      def maskImports(symbol: Symbol) = {
+        def maskImports(imports: Imports): Imports =
+          imports match {
+            case Nil =>
+              Nil
+
+            case Nil :: scopes =>
+              Nil :: maskImports(scopes)
+
+            case ((info @ (tree, symbols)) :: scope) :: scopes =>
+              if (symbols contains symbol) {
+                hasImports = hasImports || (scope :: scopes exists { _.nonEmpty })
+                maskPosition(tree)
+                scope :: scopes
+              }
+              else {
+                hasImports = true
+                val imports = maskImports(scope :: scopes)
+                (info :: imports.head) :: imports.tail
+              }
+          }
+
+        if (hasImports) {
+          hasImports = false
+          imports = maskImports(imports)
+        }
+      }
+
+      override def traverse(tree: Tree) = tree match {
+        case tree: TypeTree if tree.original != null =>
+          traverse(tree.original)
+
+        case Import(expr, selectors)
+            if expr.symbol != NoSymbol && !isPositionMasked(tree) =>
+          if (selectors forall { _.namePos != -1 }) {
+            val (importedNames, hiddenNames, isWildcard) =
+              selectors.foldLeft[(Set[String], Set[String], Boolean)](
+                  (Set.empty, Set.empty, false)) {
+                case ((importedNames, hiddenNames, isWildcard), selector) =>
+                  if (selector.name != termNames.WILDCARD) {
+                    if (selector.rename != termNames.WILDCARD)
+                      (importedNames + selector.name.toString,
+                       hiddenNames,
+                       isWildcard)
+                    else
+                      (importedNames,
+                       hiddenNames + selector.name.toString,
+                       isWildcard)
+                  }
+                  else
+                    (importedNames, hiddenNames, true)
+              }
+
+            val members =
+              expr.symbol.info.members filter { symbol =>
+                symbol.isPublic && !symbol.isConstructor
+              }
+
+            val imported =
+              if (!isWildcard)
+                members filter { importedNames contains _.name.toString }
+              else
+                members
+
+            val unhidden =
+              imported filterNot { hiddenNames contains _.name.toString }
+
+            hasImports = true
+            imports = (tree -> unhidden.toSet :: imports.head) :: imports.tail
+          }
+          else
+            maskPosition(tree)
+
+        case Select(_, _) if hasImports =>
+          def traversePath(tree: Tree, found: Boolean): Unit = tree match {
+            case Select(qualifier, name) =>
+              if (!found && tree.pos == qualifier.pos) {
+                if (tree.symbol != NoSymbol)
+                  maskImports(tree.symbol)
+
+                traversePath(
+                  qualifier,
+                  name.toString != "apply" && name.toString != "update")
+              }
+              else
+                traversePath(qualifier, found)
+
+            case _ =>
+              traverse(tree)
+          }
+
+          traversePath(tree, false)
+
+        case Block(_, _) | Template(_, _, _) =>
+          imports ::= List.empty
+          super.traverse(tree)
+          imports = imports.tail
+
+        case _ =>
+          super.traverse(tree)
+      }
+    }
+
+    importMasker traverse tree
+
+    tree
   }
 
   private def fixUntypecheck(tree: Tree): Tree = {
