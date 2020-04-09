@@ -8,6 +8,9 @@ object TyperTester {
   def createTypeTree[T]: String = macro createTypeTreeImpl[T]
 
 
+  def scalaWithoutBug11609(code: String): Unit = macro scalaWithoutBug11609Impl
+
+
   def retyper[T](code: T): T = macro retyperImpl[T]
 
   def retyperAll[T](code: T): T = macro retyperAllImpl[T]
@@ -99,7 +102,32 @@ object TyperTester {
   }
 
 
-  def retyperImpl[T](c: Context)(code: c.Expr[T]): c.Expr[T] =
+  def scalaWithoutBug11609Impl(c: Context)(code: c.Expr[String]): c.Expr[Unit] = {
+    import c.universe._
+
+    val scalaBug11609 =
+      c.classPath exists { url =>
+        val file = url.getFile
+        val index = file indexOf "/scala-library-"
+        val start = index + 15
+        val end = index + 19
+        index != -1 && end <= file.length && ((file substring (start, end)) == "2.13")
+      }
+
+    code.tree match {
+      case Literal(Constant(code: String)) =>
+        if (scalaBug11609)
+          c.Expr[Unit](Literal(Constant(())))
+        else
+          c.Expr[Unit](c parse code)
+
+      case _ =>
+        c.abort(c.enclosingPosition, "string literal required")
+    }
+  }
+
+
+  def retyperImpl[T](c: Context)(code: c.Expr[T]): c.Expr[T] = 
     c.Expr[T](retyperTypecheck(c)(code.tree))
 
   def retyperAllImpl[T](c: Context)(code: c.Expr[T]): c.Expr[T] =

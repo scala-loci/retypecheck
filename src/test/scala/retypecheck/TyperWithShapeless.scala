@@ -1,9 +1,10 @@
 package retypecheck
 
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 import shapeless._
 
-class TyperWithShapelessSpec extends FlatSpec with Matchers {
+class TyperWithShapelessSpec extends AnyFlatSpec with Matchers {
   case class Foo(i: Int, s: String, b: Boolean)
   val foo = Foo(23, "foo", true)
 
@@ -88,10 +89,10 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
     }""" should compile
   }
 
-  import syntax.zipper._
+  it should "typecheck zippers for heterogenous lists" in TyperTester.scalaWithoutBug11609 { """
+    import syntax.zipper._
 
-  it should "typecheck zippers for heterogenous lists" in {
-    """TyperTester.retyper {
+    """ + "\"\"\"" + """ TyperTester.retyper {
       val l = 1 :: "foo" :: 3.0 :: HNil
 
       val a0 = l.toZipper.right.put(("wibble", 45)).reify
@@ -102,9 +103,9 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
 
       val c0 = l.toZipper.last.left.insert("bar").reify
       val c1: Int :: String :: String :: Double :: HNil = c0
-    }""" should compile
+    }""" + "\"\"\"" + """ should compile
 
-    """TyperTester.retyperAll {
+    """ + "\"\"\"" + """TyperTester.retyperAll {
       val l = 1 :: "foo" :: 3.0 :: HNil
 
       val a0 = l.toZipper.right.put(("wibble", 45)).reify
@@ -115,9 +116,9 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
 
       val c0 = l.toZipper.last.left.insert("bar").reify
       val c1: Int :: String :: String :: Double :: HNil = c0
-    }""" should compile
+    }""" + "\"\"\"" + """ should compile
 
-    """@TyperTester.retyper class C {
+    """ + "\"\"\"" + """@TyperTester.retyper class C {
       val l = 1 :: "foo" :: 3.0 :: HNil
 
       val a0 = l.toZipper.right.put(("wibble", 45)).reify
@@ -128,9 +129,9 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
 
       val c0 = l.toZipper.last.left.insert("bar").reify
       val c1: Int :: String :: String :: Double :: HNil = c0
-    }""" should compile
+    }""" + "\"\"\"" + """ should compile
 
-    """@TyperTester.retyperAll class C {
+    """ + "\"\"\"" + """@TyperTester.retyperAll class C {
       val l = 1 :: "foo" :: 3.0 :: HNil
 
       val a0 = l.toZipper.right.put(("wibble", 45)).reify
@@ -141,8 +142,8 @@ class TyperWithShapelessSpec extends FlatSpec with Matchers {
 
       val c0 = l.toZipper.last.left.insert("bar").reify
       val c1: Int :: String :: String :: Double :: HNil = c0
-    }""" should compile
-  }
+    }""" + "\"\"\"" + """ should compile
+  """ }
 
   it should "typecheck statically sized collections" in {
     def row(cols: Seq[String]) =

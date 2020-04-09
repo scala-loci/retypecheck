@@ -1,6 +1,7 @@
 package retypecheck
 
-import org.scalatest._
+import org.scalatest.flatspec.AsyncFlatSpec
+import org.scalatest.matchers.should.Matchers
 import scala.async.Async._
 import scala.concurrent.Future
 

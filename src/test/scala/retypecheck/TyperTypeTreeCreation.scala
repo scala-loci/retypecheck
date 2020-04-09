@@ -1,9 +1,10 @@
 package retypecheck
 
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 import scala.language.existentials
 
-class TyperTypeTreeCreationSpec extends FlatSpec with Matchers {
+class TyperTypeTreeCreationSpec extends AnyFlatSpec with Matchers {
   behavior of "Typer for type tree creation"
 
   class Test { type Type }

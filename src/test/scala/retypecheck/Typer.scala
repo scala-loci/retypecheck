@@ -1,13 +1,14 @@
 package retypecheck
 
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 import globalObject._
 
 object globalObject {
   def globalValue = 3
 }
 
-class TyperSpec extends FlatSpec with Matchers {
+class TyperSpec extends AnyFlatSpec with Matchers {
   class A(val i: Int)
   case class B(j: Int) extends A(0)
 

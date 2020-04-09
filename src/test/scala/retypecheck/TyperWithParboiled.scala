@@ -1,10 +1,11 @@
 package retypecheck
 
-import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 import org.parboiled2._
 import scala.util.Success
 
-class TyperWithParboiled extends FlatSpec with Matchers {
+class TyperWithParboiled extends AnyFlatSpec with Matchers {
   behavior of "Typer for code using parboiled2 examples"
 
   it should "correctly compile parser for simple integer expressions" in {
