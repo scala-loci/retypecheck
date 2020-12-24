@@ -1,8 +1,8 @@
 package retypecheck
 
 import scala.annotation.StaticAnnotation
-import scala.reflect.macros.blackbox.Context
 import scala.language.experimental.macros
+import scala.reflect.macros.blackbox
 
 object TyperTester {
   def createTypeTree[T]: String = macro createTypeTreeImpl[T]
@@ -25,10 +25,10 @@ object TyperTester {
   }
 
 
-  def retyperAnnoImpl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
+  def retyperAnnoImpl(c: blackbox.Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
     import c.universe._
 
-    val annottee :: companion = annottees map { _.tree }
+    val annottee :: companion = annottees map { _.tree }: @unchecked
     val result = annottee match {
       case ClassDef(_, _, _, _) => retyperTypecheck(c)(annottee)
       case ModuleDef(_, _, _) => retyperTypecheck(c)(annottee)
@@ -44,10 +44,10 @@ object TyperTester {
       c.Expr[Any](q"$result; ${companion.head}")
   }
 
-  def retyperAnnoAllImpl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
+  def retyperAnnoAllImpl(c: blackbox.Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
     import c.universe._
 
-    val annottee :: companion = annottees map { _.tree }
+    val annottee :: companion = annottees map { _.tree }: @unchecked
     val result = annottee match {
       case ClassDef(_, _, _, _) => retyperAllTypecheck(c)(annottee)
       case ModuleDef(_, _, _) => retyperAllTypecheck(c)(annottee)
@@ -64,7 +64,7 @@ object TyperTester {
   }
 
 
-  def createTypeTreeImpl[T: c.WeakTypeTag](c: Context): c.Expr[String] = {
+  def createTypeTreeImpl[T: c.WeakTypeTag](c: blackbox.Context): c.Expr[String] = {
     import c.universe._
 
     object withAttrs extends Transformer {
@@ -80,13 +80,13 @@ object TyperTester {
           Ident(typeNames.ERROR)
         case _ =>
           if (tree.symbol != null && tree.symbol != NoSymbol)
-            internal setSymbol (tree, NoSymbol)
-          super.transform(internal setType (tree, null))
+            internal.setSymbol(tree, NoSymbol)
+          super.transform(internal.setType(tree, null))
       }
     }
 
     val t = c.retyper
-    val tree = t createTypeTree (weakTypeOf[T], NoPosition)
+    val tree = t.createTypeTree(weakTypeOf[T], NoPosition)
 
     val stringWithAttrs = (withAttrs transform tree.duplicate).toString
       .replaceAll("[\\r\\n\\s]+", " ")
@@ -102,7 +102,7 @@ object TyperTester {
   }
 
 
-  def scalaWithoutBug11609Impl(c: Context)(code: c.Expr[String]): c.Expr[Unit] = {
+  def scalaWithoutBug11609Impl(c: blackbox.Context)(code: c.Expr[String]): c.Expr[Unit] = {
     import c.universe._
 
     val scalaBug11609 =
@@ -111,7 +111,7 @@ object TyperTester {
         val index = file indexOf "/scala-library-"
         val start = index + 15
         val end = index + 19
-        index != -1 && end <= file.length && ((file substring (start, end)) == "2.13")
+        index != -1 && end <= file.length && (file.substring(start, end) == "2.13")
       }
 
     code.tree match {
@@ -127,14 +127,14 @@ object TyperTester {
   }
 
 
-  def retyperImpl[T](c: Context)(code: c.Expr[T]): c.Expr[T] = 
+  def retyperImpl[T](c: blackbox.Context)(code: c.Expr[T]): c.Expr[T] =
     c.Expr[T](retyperTypecheck(c)(code.tree))
 
-  def retyperAllImpl[T](c: Context)(code: c.Expr[T]): c.Expr[T] =
+  def retyperAllImpl[T](c: blackbox.Context)(code: c.Expr[T]): c.Expr[T] =
     c.Expr[T](retyperAllTypecheck(c)(code.tree))
 
 
-  private def retyperTypecheck(c: Context)(tree: c.Tree): c.Tree = {
+  private def retyperTypecheck(c: blackbox.Context)(tree: c.Tree): c.Tree = {
     val t = c.retyper
     if (!c.hasErrors)
       t untypecheck (t typecheck (t untypecheck (t typecheck (t untypecheck tree))))
@@ -142,7 +142,7 @@ object TyperTester {
       tree
   }
 
-  private def retyperAllTypecheck(c: Context)(tree: c.Tree): c.Tree = {
+  private def retyperAllTypecheck(c: blackbox.Context)(tree: c.Tree): c.Tree = {
     val t = c.retyper
     if (!c.hasErrors)
       t untypecheckAll (t typecheck (t untypecheckAll (t typecheck (t untypecheckAll tree))))

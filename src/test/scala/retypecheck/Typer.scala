@@ -261,7 +261,7 @@ class TyperSpec extends AnyFlatSpec with Matchers {
         case object CaseObject extends Trait
 
         val instance: Trait = StringCase("", TraitCase(IntCase(2)))
-        val i = instance match {
+        val i = (instance: @unchecked) match {
           case IntCase(i) => i + argument + 1
           case StringCase(_, TraitCase(IntCase(i))) => i + argument + 1
           case CaseObject => argument + 2
@@ -285,7 +285,7 @@ class TyperSpec extends AnyFlatSpec with Matchers {
         case object CaseObject extends Trait
 
         val instance: Trait = StringCase("", TraitCase(IntCase(2)))
-        val i = instance match {
+        val i = (instance: @unchecked) match {
           case IntCase(i) => i + argument + 1
           case StringCase(_, TraitCase(IntCase(i))) => i + argument + 1
           case CaseObject => argument + 2
@@ -309,7 +309,7 @@ class TyperSpec extends AnyFlatSpec with Matchers {
         case object CaseObject extends Trait
 
         val instance: Trait = StringCase("", TraitCase(IntCase(2)))
-        val i = instance match {
+        val i = (instance: @unchecked) match {
           case IntCase(i) => i + argument + 1
           case StringCase(_, TraitCase(IntCase(i))) => i + argument + 1
           case CaseObject => argument + 2
@@ -332,7 +332,7 @@ class TyperSpec extends AnyFlatSpec with Matchers {
         case object CaseObject extends Trait
 
         val instance: Trait = StringCase("", TraitCase(IntCase(2)))
-        val i = instance match {
+        val i = (instance: @unchecked) match {
           case IntCase(i) => i + argument + 1
           case StringCase(_, TraitCase(IntCase(i))) => i + argument + 1
           case CaseObject => argument + 2

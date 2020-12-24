@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import shapeless._
 
+@compatibility.nowarn("cat=lint-byname-implicit")
 class TyperWithShapelessSpec extends AnyFlatSpec with Matchers {
   case class Foo(i: Int, s: String, b: Boolean)
   val foo = Foo(23, "foo", true)

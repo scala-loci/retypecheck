@@ -3,17 +3,17 @@ package retypecheck
 import org.scalamacros.resetallattrs._
 import scala.collection.mutable
 import scala.reflect.internal.util
-import scala.reflect.macros.blackbox.Context
+import scala.reflect.macros.blackbox
 import scala.reflect.macros.TypecheckException
 
 object ReTyper {
-  def apply(c: Context) = new ReTyper[c.type](c)
+  def apply(c: blackbox.Context) = new ReTyper[c.type](c)
 }
 
 /**
  * heavy wizardry to fight the dark forces of Scala type-checking in macros
  */
-class ReTyper[+C <: Context](val c: C) {
+class ReTyper[+C <: blackbox.Context](val c: C) {
   import c.universe._
   import Flag._
 
@@ -175,10 +175,10 @@ class ReTyper[+C <: Context](val c: C) {
                   owner.asClass.module
                 else
                   symbol
-              tree withAttrs (sym, sym.typeSignature, pos)
+              tree.withAttrs(sym, sym.typeSignature, pos)
             }
             else
-              tree withAttrs (preSymbolSingle, pre, pos)
+              tree.withAttrs(preSymbolSingle, pre, pos)
 
           case _ =>
             preTree
@@ -209,7 +209,7 @@ class ReTyper[+C <: Context](val c: C) {
         case ThisType(pre)
             if pre.isType && !pre.isModule && !pre.isPackage &&
                pre.name.toString != "<refinement>" =>
-          This(pre.asType.name) withAttrs (tpe.typeSymbol, tpe, pos)
+          This(pre.asType.name).withAttrs(tpe.typeSymbol, tpe, pos)
 
         case ThisType(pre)
             if isAccessible(pre, allOwners) &&
@@ -220,16 +220,16 @@ class ReTyper[+C <: Context](val c: C) {
           val module = if (sym.isModuleClass) sym.asClass.module else sym
           val prefix = expandPrefix(pre, module)
           val symbol = if (isNonRepresentableType(tpe)) NoSymbol else module
-          if (!args.isEmpty)
+          if (args.nonEmpty)
             AppliedTypeTree(
-                prefix withAttrs (
-                  symbol, internal typeRef (pre, sym, List.empty), pos),
-                args map expandType) withAttrs (
+                prefix.withAttrs(
+                  symbol, internal.typeRef(pre, sym, List.empty), pos),
+                args map expandType).withAttrs(
               symbol, tpe, pos)
           else if (sym.isModuleClass)
-            SingletonTypeTree(prefix withAttrs (symbol, tpe, pos))
+            SingletonTypeTree(prefix.withAttrs(symbol, tpe, pos))
           else
-            prefix withAttrs (symbol, tpe, pos)
+            prefix.withAttrs(symbol, tpe, pos)
 
         case SingleType(pre, sym) if sym.name.toString != "<refinement>" =>
           val module = if (sym.isModuleClass) sym.asClass.module else sym
@@ -237,7 +237,7 @@ class ReTyper[+C <: Context](val c: C) {
             case Select(prefix, termNames.PACKAGE) if pre.typeSymbol.isPackage =>
               prefix
             case prefix =>
-              SingletonTypeTree(prefix withAttrs (module, tpe, pos))
+              SingletonTypeTree(prefix.withAttrs(module, tpe, pos))
           }
 
         case TypeBounds(lo, hi) =>
@@ -248,7 +248,7 @@ class ReTyper[+C <: Context](val c: C) {
         case ExistentialType(quantified, underlying) =>
           val whereClauses = quantified map { quantified =>
             quantified.typeSignature match {
-              case TypeBounds(lo, hi) =>
+              case TypeBounds(_, _) =>
                 val mods = Modifiers(
                   DEFERRED | (if (quantified.isSynthetic) SYNTHETIC else NoFlags))
 
@@ -269,10 +269,10 @@ class ReTyper[+C <: Context](val c: C) {
             ExistentialTypeTree(expandType(underlying), whereClauses.flatten)
 
         case ClassInfoType(parents, decls, typeSymbol) =>
-          val publicDecls = internal newScopeWith (decls.toSeq filter { symbol =>
+          val publicDecls = internal.newScopeWith(decls.toSeq filter { symbol =>
             symbol.isPublic && !symbol.isConstructor
           }: _*)
-          expandType(internal refinedType (parents, publicDecls, typeSymbol))
+          expandType(internal.refinedType(parents, publicDecls, typeSymbol))
 
         case RefinedType(parents, scope) =>
           def refiningType(sym: TypeSymbol): TypeDef = {
@@ -345,8 +345,8 @@ class ReTyper[+C <: Context](val c: C) {
       }
 
       if (tree.tpe == null)
-        internal setType (tree, tpe)
-      internal setPos (tree, pos)
+        internal.setType(tree, tpe)
+      internal.setPos(tree, pos)
     }
 
     expandType(tpe)
@@ -476,7 +476,7 @@ class ReTyper[+C <: Context](val c: C) {
         Select(expandSymbol(symbol.owner, pos), symbol.name.toTermName)
 
     val sym = if (symbol.isModuleClass) symbol.asClass.module else symbol
-    tree withAttrs (sym, sym.typeSignature, pos)
+    tree.withAttrs(sym, sym.typeSignature, pos)
   }
 
   private def ownerChain(symbol: Symbol): List[Symbol] =
@@ -540,11 +540,11 @@ class ReTyper[+C <: Context](val c: C) {
       var foundAdditionals = true
       while (foundAdditionals) {
         symbols ++= currentSymbols
-        currentSymbols = (currentSymbols map {
+        currentSymbols = currentSymbols flatMap {
           _.toType.members collect {
             case symbol if symbol.isType => symbol.asType
           }
-        }).flatten
+        }
         foundAdditionals = (currentSymbols -- symbols).nonEmpty
       }
 
@@ -556,7 +556,7 @@ class ReTyper[+C <: Context](val c: C) {
     val classNestingSet = mutable.Set(owners: _*)
 
     val classNestingList =
-      mutable.ListBuffer((owners.reverse map { _.name.toTypeName }): _*)
+      mutable.ListBuffer(owners.reverse map { _.name.toTypeName }: _*)
 
     val shadowedNames = mutable.ListBuffer.empty[Set[Name]]
 
@@ -575,7 +575,7 @@ class ReTyper[+C <: Context](val c: C) {
       var underExpansion = false
 
       while (!underExpansion && tpes.nonEmpty)
-        tpes remove 0 exists { tpe =>
+        tpes.remove(0) exists { tpe =>
           if (!(seen contains tpe)) {
             if (!(definedTypeSymbols exists { tpe contains _ })) {
               seen += tpe
@@ -656,7 +656,7 @@ class ReTyper[+C <: Context](val c: C) {
           }
 
           if (tree.tpe != null)
-            internal setType (tree, removeAnnotationsToBeRemoved(tree.tpe))
+            internal.setType(tree, removeAnnotationsToBeRemoved(tree.tpe))
 
           isNowarn
         }
@@ -699,7 +699,7 @@ class ReTyper[+C <: Context](val c: C) {
             val typeTree = createTypeTree(tree.tpe, tree.pos, classNestingSet)
 
             val hasNonRepresentableType = typeTree exists {
-              case tree: TypeTree => true
+              case _: TypeTree => true
               case _ => false
             }
 
@@ -715,57 +715,57 @@ class ReTyper[+C <: Context](val c: C) {
 
         case Annotated(annot, arg) if isAnnotationToBeRemoved(annot) =>
           if (arg.tpe != null)
-            transform(internal setType (
+            transform(internal.setType(
               arg,
               removeAnnotationsToBeRemoved(arg.tpe)))
           else
             transform(arg)
 
         case ClassDef(_, tpname, _, impl) =>
-          classNestingList prepend tpname
+          classNestingList.prepend(tpname)
           if (tree.symbol.isClass)
             classNestingSet += tree.symbol
 
-          shadowedNames prepend templateNames(impl)
+          shadowedNames.prepend(templateNames(impl))
 
           val classDef = super.transform(tree)
 
-          shadowedNames remove 0
+          shadowedNames.remove(0)
 
           if (tree.symbol.isClass)
             classNestingSet -= tree.symbol
-          classNestingList remove 0
+          classNestingList.remove(0)
 
           classDef
 
         case ModuleDef(_, tname, impl) =>
-          classNestingList prepend tname.toTypeName
+          classNestingList.prepend(tname.toTypeName)
           if (tree.symbol.isModule)
             classNestingSet += tree.symbol.asModule.moduleClass
 
-          shadowedNames prepend templateNames(impl)
+          shadowedNames.prepend(templateNames(impl))
 
           val moduleDef = super.transform(tree)
 
-          shadowedNames remove 0
+          shadowedNames.remove(0)
 
           if (tree.symbol.isModule)
             classNestingSet -= tree.symbol.asModule.moduleClass
-          classNestingList remove 0
+          classNestingList.remove(0)
 
           moduleDef
 
-        case DefDef(mods, termNames.CONSTRUCTOR, tparams, vparamss, tpt, rhs) =>
-          shadowedNames prepend (vparamss.flatten map { _.name }).toSet
+        case DefDef(mods, termNames.CONSTRUCTOR, tparams, vparamss, _, rhs) =>
+          shadowedNames.prepend((vparamss.flatten map { _.name }).toSet)
 
           val defDef = DefDef(
             transformModifiers(mods), termNames.CONSTRUCTOR,
             transformTypeDefs(tparams), transformValDefss(vparamss),
             TypeTree(), transform(rhs))
 
-          shadowedNames remove 0
+          shadowedNames.remove(0)
 
-          defDef withAttrs (
+          defDef.withAttrs(
             tree.symbol,
             tree.tpe,
             if (tree.symbol.pos != NoPosition) tree.symbol.pos else tree.pos)
@@ -778,19 +778,20 @@ class ReTyper[+C <: Context](val c: C) {
             case _ => false
           }
 
-          shadowedNames prepend (vparamss.flatten map { _.name }).toSet + name
+          shadowedNames.prepend((vparamss.flatten map { _.name }).toSet + name)
 
           val defDef =
             if (emptyTypeTree && typeSignature != null && typeSignature != NoType)
-              (DefDef(
-                  transformModifiers(mods), name,
-                  transformTypeDefs(tparams), transformValDefss(vparamss),
-                  TypeTree(tree.symbol.typeSignature.finalResultType), EmptyTree)
-                withAttrs (tree.symbol, tree.tpe, tree.pos))
+              DefDef(
+                transformModifiers(mods), name,
+                transformTypeDefs(tparams), transformValDefss(vparamss),
+                TypeTree(tree.symbol.typeSignature.finalResultType),
+                EmptyTree).withAttrs(
+                  tree.symbol, tree.tpe, tree.pos)
             else
               super.transform(tree)
 
-          shadowedNames remove 0
+          shadowedNames.remove(0)
           defDef
 
         case ValDef(mods, name, tpt, EmptyTree) =>
@@ -801,18 +802,19 @@ class ReTyper[+C <: Context](val c: C) {
             case _ => false
           }
 
-          shadowedNames prepend Set(name)
+          shadowedNames.prepend(Set(name))
 
           val result =
             if (emptyTypeTree && typeSignature != null && typeSignature != NoType)
-              (ValDef(
-                  transformModifiers(mods), name,
-                  TypeTree(tree.symbol.typeSignature.finalResultType), EmptyTree)
-                withAttrs (tree.symbol, tree.tpe, tree.pos))
+              ValDef(
+                transformModifiers(mods), name,
+                TypeTree(tree.symbol.typeSignature.finalResultType),
+                EmptyTree).withAttrs(
+                  tree.symbol, tree.tpe, tree.pos)
             else
               super.transform(tree)
 
-          shadowedNames remove 0
+          shadowedNames.remove(0)
           result
 
         case _: ValDef | _: DefDef | _: CaseDef | _: Function | _: Block =>
@@ -829,13 +831,15 @@ class ReTyper[+C <: Context](val c: C) {
               stats collect {
                 case defTree: DefTree if defTree.isTerm => defTree.name
               }
+            case _ =>
+              List.empty
           }
 
-          shadowedNames prepend names.toSet
+          shadowedNames.prepend(names.toSet)
 
           val result = super.transform(tree)
 
-          shadowedNames remove 0
+          shadowedNames.remove(0)
           result
 
         case TypeApply(fun, targs) =>
@@ -852,9 +856,9 @@ class ReTyper[+C <: Context](val c: C) {
             if name == "$" + "isInstanceOf" =>
           super.transform(
             TypeApply(
-                Select(qual, TermName("isInstanceOf")) withAttrs (
+                Select(qual, TermName("isInstanceOf")).withAttrs(
                   select.symbol, select.tpe, select.pos),
-                List(targ)) withAttrs (
+                List(targ)).withAttrs(
               typeApply.symbol, typeApply.tpe, typeApply.pos))
 
         case Apply(fun, args)
@@ -904,8 +908,8 @@ class ReTyper[+C <: Context](val c: C) {
           }
 
         case Select(_, _) | Ident(_) | This(_)
-            if (tree.tpe != null && isTypeUnderExpansion(tree.tpe)) =>
-          internal setSymbol (tree, NoSymbol)
+            if tree.tpe != null && isTypeUnderExpansion(tree.tpe) =>
+          internal.setSymbol(tree, NoSymbol)
           super.transform(tree)
 
         case _ =>
@@ -927,7 +931,7 @@ class ReTyper[+C <: Context](val c: C) {
       val index = file indexOf "/scala-library-"
       val start = index + 15
       val end = index + 19
-      index != -1 && end <= file.length && ((file substring (start, end)) == "2.13")
+      index != -1 && end <= file.length && file.substring(start, end) == "2.13"
     }
 
     val syntheticMethodNames =
@@ -955,15 +959,18 @@ class ReTyper[+C <: Context](val c: C) {
           val moduleDef = ModuleDef(mods, name,
             Template(parents, self, resetCaseImplBody(body)))
 
-          internal updateAttachment (moduleDef, CaseClassMarker)
-          moduleDef withAttrs (implDef.symbol, implDef.tpe, implDef.pos)
+          internal.updateAttachment(moduleDef, CaseClassMarker)
+          moduleDef.withAttrs(implDef.symbol, implDef.tpe, implDef.pos)
 
         case ClassDef(mods, tpname, tparams, Template(parents, self, body)) =>
           val classDef = ClassDef(mods, tpname, tparams,
             Template(parents, self, resetCaseImplBody(body)))
 
-          internal updateAttachment (classDef, CaseClassMarker)
-          classDef withAttrs (implDef.symbol, implDef.tpe, implDef.pos)
+          internal.updateAttachment(classDef, CaseClassMarker)
+          classDef.withAttrs(implDef.symbol, implDef.tpe, implDef.pos)
+
+        case _ =>
+          implDef
       }
 
       def fixCaseClasses(trees: List[Tree]) = {
@@ -973,7 +980,7 @@ class ReTyper[+C <: Context](val c: C) {
         }).toSet
 
         symbols ++= (trees collect {
-          case tree @ ClassDef(mods, tpname, _, _)
+          case tree @ ClassDef(mods, _, _, _)
               if tree.symbol != NoSymbol &&
                  (mods hasFlag CASE) =>
             Seq(tree.symbol)
@@ -1030,14 +1037,14 @@ class ReTyper[+C <: Context](val c: C) {
 
         val result = tree match {
           case _
-              if (internal attachments tree).contains[CaseClassMarker.type] =>
-            internal removeAttachment[CaseClassMarker.type] tree
+              if internal.attachments(tree).contains[CaseClassMarker.type] =>
+            internal.removeAttachment[CaseClassMarker.type](tree)
             tree
           case tree: TypeTree if symbolsContains(tree.symbol) =>
             createTypeTree(tree.tpe, tree.pos, owners)
           case _
               if symbolsContains(tree.symbol) =>
-            super.transform(internal setSymbol (tree, NoSymbol))
+            super.transform(internal.setSymbol(tree, NoSymbol))
           case _ =>
             super.transform(tree)
         }
@@ -1075,7 +1082,7 @@ class ReTyper[+C <: Context](val c: C) {
     override def transform(tree: Tree) = tree match {
       case tree: TypeTree =>
         if (tree.original != null)
-          internal setOriginal (tree, transform(tree.original))
+          internal.setOriginal(tree, transform(tree.original))
         tree
 
       case implDef: ImplDef =>
@@ -1102,11 +1109,11 @@ class ReTyper[+C <: Context](val c: C) {
           else
             None
 
-        stack prepend Left((symbol, implDef.name.toTypeName, names.toSet, self))
+        stack.prepend(Left((symbol, implDef.name.toTypeName, names.toSet, self)))
 
         val result = super.transform(implDef)
 
-        stack remove 0
+        stack.remove(0)
         result
 
       case _: ValDef | _: DefDef | _: CaseDef | _: Function | _: Block =>
@@ -1121,13 +1128,15 @@ class ReTyper[+C <: Context](val c: C) {
             vparams map { _.name }
           case Block(stats, _) =>
             stats collect { case defTree: DefTree => defTree.name }
+          case _ =>
+            List.empty
         }
 
-        stack prepend Right(names.toSet)
+        stack.prepend(Right(names.toSet))
 
         val result = super.transform(tree)
 
-        stack remove 0
+        stack.remove(0)
         result
 
       case Select(thisTree @ This(thisName), selectedName) =>
@@ -1183,7 +1192,7 @@ class ReTyper[+C <: Context](val c: C) {
 
         val result = modification match {
           case Self(self) =>
-            val qualifier = Ident(self.name) withAttrs (
+            val qualifier = Ident(self.name).withAttrs(
               self.symbol,
               thisTree.tpe,
               if (thisTree.pos != NoPosition) thisTree.pos else tree.pos)
@@ -1198,7 +1207,7 @@ class ReTyper[+C <: Context](val c: C) {
         }
 
         result map {
-          _ withAttrs (
+          _.withAttrs(
             tree.symbol,
             tree.tpe,
             if (tree.pos != NoPosition) tree.pos else thisTree.pos)
@@ -1211,9 +1220,9 @@ class ReTyper[+C <: Context](val c: C) {
 
   private implicit class TreeOps(tree: Tree) {
     def withAttrs(symbol: Symbol, tpe: Type, pos: Position) =
-      internal setPos (
-        internal setType (
-          internal setSymbol (tree, symbol), tpe), pos)
+      internal.setPos(
+        internal.setType(
+          internal.setSymbol(tree, symbol), tpe), pos)
     def equalsTypedStructure(other: Tree) =
       (tree equalsStructure other) &&
       ((tree collect { case tree: TypeTree => tree }).zipAll
@@ -1291,7 +1300,7 @@ class ReTyper[+C <: Context](val c: C) {
       val macroDefaultArgsPending = mutable.Map.empty[String, Option[DefDef]]
 
       val processedStats = stats map {
-        case defDef @ DefDef(mods, name, tparams, vparamss, tpt, rhs)
+        case defDef @ DefDef(_, name, tparams, vparamss, tpt, rhs)
             if defaultArgDef(defDef) =>
           val nameString = name.toString
           val macroDefDef = DefDef(
@@ -1301,10 +1310,9 @@ class ReTyper[+C <: Context](val c: C) {
 
           if (nameString endsWith "$macro") {
             if (accessedDefaultArgs contains defDef.symbol)
-              (macroDefaultArgsPending
-                getOrElseUpdate (
-                  nameString substring (0, nameString.size - 6), None)
-                foreach { macroDefaultArgs += _ })
+              macroDefaultArgsPending.getOrElseUpdate(
+                nameString.substring(0, nameString.length - 6),
+                None) foreach { macroDefaultArgs += _ }
             EmptyTree
           }
           else {
@@ -1325,8 +1333,8 @@ class ReTyper[+C <: Context](val c: C) {
 
     def applyMetaProperties(from: Tree, to: Tree) = {
       if (from.symbol != null)
-        internal setSymbol (to, from.symbol)
-      internal setType (internal setPos (to, from.pos), from.tpe)
+        internal.setSymbol(to, from.symbol)
+      internal.setType(internal.setPos(to, from.pos), from.tpe)
     }
 
     object typecheckFixer extends Transformer {
@@ -1352,7 +1360,7 @@ class ReTyper[+C <: Context](val c: C) {
       override def transform(tree: Tree) = tree match {
         case tree: TypeTree =>
           if (tree.original != null)
-            internal setOriginal (tree, transform(tree.original))
+            internal.setOriginal(tree, transform(tree.original))
           tree
 
         // workaround for default arguments
@@ -1367,7 +1375,7 @@ class ReTyper[+C <: Context](val c: C) {
                 if (mods hasFlag ARTIFACT) &&
                    !(name.toString startsWith "default$") =>
               val defaultName = TermName(s"default$$$name")
-              val valDef = ValDef(mods, defaultName, tpt, rhs) withAttrs (
+              val valDef = ValDef(mods, defaultName, tpt, rhs).withAttrs(
                 tree.symbol, tree.tpe, tree.pos)
               Some(valDef -> (name -> tree.symbol -> defaultName))
             case _ =>
@@ -1383,9 +1391,8 @@ class ReTyper[+C <: Context](val c: C) {
               object transformer extends Transformer {
                 override def transform(tree: Tree) = tree match {
                   case tree @ Ident(name: TermName) =>
-                    val defaultName =
-                      names get (name -> tree.symbol) getOrElse name
-                    Ident(defaultName) withAttrs (
+                    val defaultName = names.getOrElse(name -> tree.symbol, name)
+                    Ident(defaultName).withAttrs(
                       tree.symbol, tree.tpe, tree.pos)
                   case tree =>
                     super.transform(tree)
@@ -1408,7 +1415,7 @@ class ReTyper[+C <: Context](val c: C) {
             applyMetaProperties(tree, Block(block.tail, block.head)))
 
         case Select(qualifier, name)
-            if (accessedDefaultArgs contains tree.symbol) =>
+            if accessedDefaultArgs contains tree.symbol =>
           val macroName =
             if (name.toString endsWith "$macro") name
             else TermName(s"${name.toString}$$macro")
@@ -1452,13 +1459,13 @@ class ReTyper[+C <: Context](val c: C) {
           EmptyTree
 
         // fix vars and vals
-        case defDef @ DefDef(mods, name, _, _, tpt, _)
+        case defDef @ DefDef(mods, name, _, _, _, _)
             if tree.symbol.isTerm && {
               val term = tree.symbol.asTerm
               !term.isLazy && term.isGetter
             } =>
           val term = tree.symbol.asTerm
-          val valDef = rhss get tree.symbol getOrElse defDef
+          val valDef = rhss.getOrElse(tree.symbol, defDef)
           val valAnnotations = (rhss get tree.symbol).toList flatMap {
             _.symbol.annotations }
           val newMods = Modifiers(
@@ -1479,7 +1486,7 @@ class ReTyper[+C <: Context](val c: C) {
           val newValDef = ValDef(
             fixModifiers(newMods, defDef.symbol, valAnnotations),
             name, transform(valDef.tpt), transform(valDef.rhs))
-          newValDef withAttrs (defDef.symbol, valDef.tpe, valDef.pos)
+          newValDef.withAttrs(defDef.symbol, valDef.tpe, valDef.pos)
 
         // fix lazy vals
         case valOrDefDef: ValOrDefDef
@@ -1510,7 +1517,7 @@ class ReTyper[+C <: Context](val c: C) {
           val newValDef = ValDef(
             fixModifiers(newMods, valOrDefDef.symbol, valAnnotations),
             valOrDefDef.name, transform(typeTree), transform(assignment))
-          newValDef withAttrs (
+          newValDef.withAttrs(
             valOrDefDef.symbol,
             valDef map { _.tpe } getOrElse valOrDefDef.tpe,
             valDef map { _.pos } getOrElse valOrDefDef.pos
@@ -1523,7 +1530,7 @@ class ReTyper[+C <: Context](val c: C) {
             fixModifiers(mods, valDef.symbol), name,
             transform(tpt),
             transform(rhs))
-          newValDef withAttrs (valDef.symbol, valDef.tpe, valDef.pos)
+          newValDef.withAttrs(valDef.symbol, valDef.tpe, valDef.pos)
 
         // fix defs
         case defDef @ DefDef(mods, name, tparams, vparamss, tpt, rhs)
@@ -1534,10 +1541,10 @@ class ReTyper[+C <: Context](val c: C) {
             transformValDefss(vparamss),
             transform(tpt),
             transform(rhs))
-          internal setType (newDefDef, defDef.tpe)
-          internal setPos (newDefDef, defDef.pos)
+          internal.setType(newDefDef, defDef.tpe)
+          internal.setPos(newDefDef, defDef.pos)
           if (tree.symbol.name != TermName("$init$"))
-            internal setSymbol (newDefDef, defDef.symbol)
+            internal.setSymbol(newDefDef, defDef.symbol)
           else
             newDefDef
 
@@ -1546,7 +1553,7 @@ class ReTyper[+C <: Context](val c: C) {
             if tree.symbol.isClass =>
           impl.body exists {
             case tree if tree.symbol != null && tree.symbol.isConstructor =>
-              internal setPos (tree, classDef.pos)
+              internal.setPos(tree, classDef.pos)
               true
             case _ =>
               false
@@ -1556,7 +1563,7 @@ class ReTyper[+C <: Context](val c: C) {
             fixModifiers(mods, classDef.symbol), name,
             transformTypeDefs(tparams),
             transformTemplate(impl))
-          newClassDef withAttrs (classDef.symbol, classDef.tpe, classDef.pos)
+          newClassDef.withAttrs(classDef.symbol, classDef.tpe, classDef.pos)
 
         // fix objects
         case moduleDef @ ModuleDef(mods, name, impl)
@@ -1564,7 +1571,7 @@ class ReTyper[+C <: Context](val c: C) {
           val newModuleDef = ModuleDef(
             fixModifiers(mods, moduleDef.symbol), name,
             transformTemplate(impl))
-          newModuleDef withAttrs (moduleDef.symbol, moduleDef.tpe, moduleDef.pos)
+          newModuleDef.withAttrs(moduleDef.symbol, moduleDef.tpe, moduleDef.pos)
 
         // fix type definitions
         case typeDef @ TypeDef(mods, name, tparams, rhs)
@@ -1573,7 +1580,7 @@ class ReTyper[+C <: Context](val c: C) {
             fixModifiers(mods, typeDef.symbol), name,
             transformTypeDefs(tparams),
             transform(rhs))
-          newTypeDef withAttrs (typeDef.symbol, typeDef.tpe, typeDef.pos)
+          newTypeDef.withAttrs(typeDef.symbol, typeDef.tpe, typeDef.pos)
 
         case _ =>
           super.transform(tree)
@@ -1582,7 +1589,7 @@ class ReTyper[+C <: Context](val c: C) {
 
     tree match {
       case _: ImplDef if tree.pos == NoPosition =>
-        internal setPos (tree, c.enclosingPosition)
+        internal.setPos(tree, c.enclosingPosition)
       case _ =>
     }
 
@@ -1613,7 +1620,7 @@ class ReTyper[+C <: Context](val c: C) {
           new UndefinedPosition
 
       pos match {
-        case pos: Position => internal setPos (tree, pos)
+        case pos: Position => internal.setPos(tree, pos)
         case _ => tree
       }
     }
@@ -1711,7 +1718,7 @@ class ReTyper[+C <: Context](val c: C) {
 
                 traversePath(
                   qualifier,
-                  name.toString != "apply" && name.toString != "update")
+                  found = name.toString != "apply" && name.toString != "update")
               }
               else
                 traversePath(qualifier, found)
@@ -1720,7 +1727,7 @@ class ReTyper[+C <: Context](val c: C) {
               traverse(tree)
           }
 
-          traversePath(tree, false)
+          traversePath(tree, found = false)
 
         case Block(_, _) | Template(_, _, _) =>
           imports ::= List.empty
@@ -1754,11 +1761,11 @@ class ReTyper[+C <: Context](val c: C) {
       override def transform(tree: Tree) = tree match {
         case tree: TypeTree =>
           if (tree.original != null)
-            internal setOriginal (tree, transform(tree.original))
+            internal.setOriginal(tree, transform(tree.original))
           tree
 
-        case Apply(fun, args) if fun.symbol != null && fun.symbol.isModule =>
-          internal setSymbol (fun, NoSymbol)
+        case Apply(fun, _) if fun.symbol != null && fun.symbol.isModule =>
+          internal.setSymbol(fun, NoSymbol)
           super.transform(tree)
 
         case Typed(expr, tpt) =>
@@ -1766,7 +1773,7 @@ class ReTyper[+C <: Context](val c: C) {
             case Function(List(), EmptyTree) =>
               super.transform(tree)
 
-            case Annotated(annot, arg)
+            case Annotated(_, arg)
                 if expr != null && arg != null &&
                    (expr equalsTypedStructure arg) =>
               super.transform(tpt)
@@ -1781,13 +1788,13 @@ class ReTyper[+C <: Context](val c: C) {
             case tpt if !tpt.isType =>
               super.transform(expr)
 
-            case tpt =>
+            case _ =>
               super.transform(tree)
           }
 
-        case Ident(name) =>
+        case Ident(_) =>
           if (tree.symbol.isTerm && tree.symbol.asTerm.isLazy)
-            internal setSymbol (tree, NoSymbol)
+            internal.setSymbol(tree, NoSymbol)
           else
             tree
 
@@ -1802,10 +1809,10 @@ class ReTyper[+C <: Context](val c: C) {
           val fixedPreSuperBody = body map {
             case tree @ ValDef(mods, name, tpt, rhs) if mods hasFlag PRESUPER =>
               tpt match {
-                case tpt: TypeTree =>
+                case _: TypeTree =>
                   tree
                 case tpt =>
-                  ValDef(mods, name, internal setOriginal (TypeTree(), tpt), rhs)
+                  ValDef(mods, name, internal.setOriginal(TypeTree(), tpt), rhs)
               }
             case tree =>
               tree
@@ -1856,9 +1863,9 @@ class ReTyper[+C <: Context](val c: C) {
           else
             super.transform(tree)
 
-        case ModuleDef(mods, name, Template(parents, self, body)) =>
+        case ModuleDef(_, _, Template(_, _, _)) =>
           super.transform(tree) match {
-            case ModuleDef(mods, _, Template(parents, noSelfType,
+            case ModuleDef(mods, _, Template(parents, `noSelfType`,
                   List() |
                   List(DefDef(_, termNames.CONSTRUCTOR,
                     List(), List(List()), _, _))))
