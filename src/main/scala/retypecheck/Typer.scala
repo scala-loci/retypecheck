@@ -525,6 +525,23 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
       try Some(c.mirror.staticClass("_root_.scala.annotation.nowarn").toType)
       catch { case _: ScalaReflectionException => None }
 
+    val scala2134plus = c.classPath exists { url =>
+      val file = url.getFile
+      val index = file indexOf "/scala-library-"
+      val start = index + 15
+      val end = index + 22
+      val version =
+        if (index != -1 && end <= file.length)
+          file.substring(start, end)
+        else
+          ""
+      (version startsWith "2.13.") &&
+      version != "2.13.0." && version != "2.13.0-" &&
+      version != "2.13.1." && version != "2.13.1-" &&
+      version != "2.13.2." && version != "2.13.2-" &&
+      version != "2.13.3." && version != "2.13.3-"
+    }
+
     val definedTypeSymbols = {
       var symbols = Set.empty[TypeSymbol]
 
@@ -630,7 +647,7 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
 
     def isAnnotationToBeRemoved(tree: Tree): Boolean = tree match {
       case Apply(
-          Select(New(_), termNames.CONSTRUCTOR),
+          Select(New(tpt), termNames.CONSTRUCTOR),
           List(arg)) =>
         val condition = arg match {
           case Literal(Constant(value: String)) => value
@@ -647,6 +664,9 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
 
         def isNowarn = nowarn exists { nowarn =>
           val isNowarn = tree.tpe match {
+            case null if scala2134plus =>
+              val name = tpt.toString
+              name == "nowarn" || (name endsWith ".nowarn")
             case tpe if tpe != null && tpe <:< nowarn =>
               true
             case AnnotatedType(annotation :: _, _) =>
@@ -857,9 +877,9 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
           super.transform(
             TypeApply(
                 Select(qual, TermName("isInstanceOf")).withAttrs(
-                  select.symbol, select.tpe, select.pos),
+                  NoSymbol, select.tpe, select.pos),
                 List(targ)).withAttrs(
-              typeApply.symbol, typeApply.tpe, typeApply.pos))
+              NoSymbol, typeApply.tpe, typeApply.pos))
 
         case Apply(fun, args)
             if tree.symbol != null && tree.symbol.isMethod && {

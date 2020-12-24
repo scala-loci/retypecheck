@@ -29,11 +29,8 @@ class TyperWithScalaAsyncSpec extends AsyncFlatSpec with Matchers {
       val v = async { await(slowCalcFuture) + await(slowCalcFuture) }
     }
 
-    Future.sequence(Seq(v1, v2, o1.v, o2.v)) map { case Seq(v1, v2, v3, v4) =>
-      v1 should be (42)
-      v2 should be (42)
-      v3 should be (42)
-      v4 should be (42)
+    Future.sequence(Seq(v1, v2, o1.v, o2.v)) map { values =>
+      (values map { _ should be (42) }).head
     }
   }
 }
