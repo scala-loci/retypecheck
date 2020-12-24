@@ -52,9 +52,9 @@ class TyperSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "typecheck early initializers" in {
-    "TyperTester.retyper { class C; val c = new { val x = 1 } with C }" should compile
+    "TyperTester.retyper { class C; val c = new { val x = 1 } with C: @compatibility.nowarn(\"msg=early initializers\") }" should compile
     "TyperTester.retyperAll { class C; val c = new { val x = 1 } with C }" should compile
-    "@TyperTester.retyper object o { class C; val c = new { val x = 1 } with C }" should compile
+    "@TyperTester.retyper @compatibility.nowarn(\"msg=early initializers\") object o { class C; val c = new { val x = 1 } with C }" should compile
     "@TyperTester.retyperAll object o { class C; val c = new { val x = 1 } with C }" should compile
   }
 

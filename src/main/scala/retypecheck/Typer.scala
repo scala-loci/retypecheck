@@ -497,6 +497,34 @@ class ReTyper[+C <: Context](val c: C) {
 
 
   private def fixTypesAndSymbols(tree: Tree): Tree = {
+    val extractNamedArg =
+      try {
+        val namedArgClass = Class.forName(s"scala.reflect.internal.Trees$$NamedArg")
+        val namedArg = c.universe.getClass.getMethod("NamedArg").invoke(c.universe)
+        val unapply = namedArg.getClass.getMethod("unapply", namedArgClass)
+
+        Some({ tree: Tree =>
+          if (namedArgClass isInstance tree)
+            try unapply.invoke(namedArg, tree) match {
+              case Some((lhs: Tree, rhs: Tree)) => Some((lhs, rhs))
+              case _ => None
+            }
+            catch { case _: ReflectiveOperationException => None }
+          else
+            None
+        })
+      }
+      catch { case _: ReflectiveOperationException => None }
+
+    object NamedArg {
+      def unapply(tree: Tree): Option[(Tree, Tree)] =
+        extractNamedArg flatMap { _(tree) }
+    }
+
+    val nowarn =
+      try Some(c.mirror.staticClass("_root_.scala.annotation.nowarn").toType)
+      catch { case _: ScalaReflectionException => None }
+
     val definedTypeSymbols = {
       var symbols = Set.empty[TypeSymbol]
 
@@ -585,6 +613,60 @@ class ReTyper[+C <: Context](val c: C) {
       tree.tpe != null && (tree.tpe exists isNonRepresentableType)
     }
 
+    def removeAnnotationsToBeRemoved(tpe: Type): Type = tpe map {
+      case AnnotatedType(annotations, underlying) =>
+        val annots = annotations filterNot { annotation =>
+          isAnnotationToBeRemoved(annotation.tree)
+        }
+
+        if (annots.nonEmpty)
+          internal.annotatedType(annots, underlying)
+        else
+          underlying
+
+      case tpe =>
+        tpe
+    }
+
+    def isAnnotationToBeRemoved(tree: Tree): Boolean = tree match {
+      case Apply(
+          Select(New(_), termNames.CONSTRUCTOR),
+          List(arg)) =>
+        val condition = arg match {
+          case Literal(Constant(value: String)) => value
+          case NamedArg(_, Literal(Constant(value: String))) => value
+          case _ => ""
+        }
+
+        def hasCondition = Seq(
+          "early initializers",
+          "initializers are deprecated",
+          "trait parameters",
+          "avoiding var",
+          "val in traits") exists { condition contains _ }
+
+        def isNowarn = nowarn exists { nowarn =>
+          val isNowarn = tree.tpe match {
+            case tpe if tpe != null && tpe <:< nowarn =>
+              true
+            case AnnotatedType(annotation :: _, _) =>
+              annotation.tree.tpe != null && annotation.tree.tpe <:< nowarn
+            case _ =>
+              false
+          }
+
+          if (tree.tpe != null)
+            internal setType (tree, removeAnnotationsToBeRemoved(tree.tpe))
+
+          isNowarn
+        }
+
+        hasCondition && isNowarn
+
+      case _ =>
+        false
+    }
+
     object typesAndSymbolsFixer extends Transformer {
       def templateNames(impl: Template) = {
         (impl.parents flatMap { parent =>
@@ -601,6 +683,14 @@ class ReTyper[+C <: Context](val c: C) {
         (if (impl.self.name != termNames.EMPTY) Some(impl.self.name) else None)
       }.toSet
 
+      override def transformModifiers(mods: Modifiers) = {
+        val annotations = mods.annotations filterNot isAnnotationToBeRemoved
+        if (annotations.size != mods.annotations.size)
+          Modifiers(mods.flags, mods.privateWithin, annotations)
+        else
+          mods
+      }
+
       override def transform(tree: Tree) = tree match {
         case tree: TypeTree =>
           if (tree.original != null)
@@ -616,10 +706,20 @@ class ReTyper[+C <: Context](val c: C) {
             if (hasNonRepresentableType)
               TypeTree()
             else
-              typeTree
+              transform(typeTree)
           }
-          else 
-            TypeTree(tree.tpe)
+          else if (tree.tpe != null)
+            TypeTree(removeAnnotationsToBeRemoved(tree.tpe))
+          else
+            TypeTree()
+
+        case Annotated(annot, arg) if isAnnotationToBeRemoved(annot) =>
+          if (arg.tpe != null)
+            transform(internal setType (
+              arg,
+              removeAnnotationsToBeRemoved(arg.tpe)))
+          else
+            transform(arg)
 
         case ClassDef(_, tpname, _, impl) =>
           classNestingList prepend tpname

@@ -32,6 +32,9 @@ def `is 2.12.2+`(scalaVersion: String): Boolean =
 def `is 2.13+`(scalaVersion: String): Boolean =
   checkVersion(scalaVersion) { case (2, m, _) => m >= 13 }
 
+def `is 2.13.2+`(scalaVersion: String): Boolean =
+  checkVersion(scalaVersion) { case (2, m, p) => m >= 13 && p >= 2 }
+
 
 val dependencies = libraryDependencies ++= Seq(
   scalaOrganization.value % "scala-reflect" % scalaVersion.value % Provided,
@@ -66,8 +69,20 @@ val base = baseDirectory in ThisBuild
 
 
 def projectWithBaseSrc(project: Project) = project settings (
+  unmanagedSourceDirectories in Compile ++= {
+    if (`is 2.13.2+`(scalaVersion.value))
+      Seq(base.value / "src" / "main" / "scala-2.13.2+")
+    else
+      Seq(base.value / "src" / "main" / "scala-2.13.1-")
+  },
   unmanagedSourceDirectories in Compile += base.value / "src" / "main" / "scala",
   unmanagedResourceDirectories in Compile += base.value / "src" / "main" / "resources",
+  unmanagedSourceDirectories in Test ++= {
+    if (`is 2.13.2+`(scalaVersion.value))
+      Seq(base.value / "src" / "test" / "scala-2.13.2+")
+    else
+      Seq(base.value / "src" / "test" / "scala-2.13.1-")
+  },
   unmanagedSourceDirectories in Test += base.value / "src" / "test" / "scala",
   unmanagedResourceDirectories in Test += base.value / "src" / "test" / "resources")
 
@@ -82,7 +97,7 @@ def testProject(project: Project) = projectWithBaseSrc(project) settings (
   crossScalaVersions := Seq(
     "2.11.6", "2.11.7", "2.11.8", "2.11.9", "2.11.10", "2.11.11", "2.11.12",
     "2.12.0", "2.12.1", "2.12.2", "2.12.3", "2.12.4", "2.12.5", "2.12.6", "2.12.7", "2.12.8", "2.12.9", "2.12.10", "2.12.11",
-    "2.13.0", "2.13.1"),
+    "2.13.0", "2.13.1", "2.13.2"),
   dependencies,
   dependenciesTest)
 
