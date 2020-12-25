@@ -443,6 +443,51 @@ class TyperSpec extends AnyFlatSpec with Matchers {
     o2.v should be (297)
   }
 
+  it should "correctly compile default arguments for case classes" in {
+    val v1 = TyperTester.retyper {
+      case class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          i + j + k + l + m + n + o + p
+      }
+      C(6, k = 5).a(60, o = 50)
+    }
+
+    val v2 = TyperTester.retyperAll {
+      case class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          i + j + k + l + m + n + o + p
+      }
+      C(6, k = 5).a(60, o = 50)
+    }
+
+    @TyperTester.retyper object o1 {
+      case class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          i + j + k + l + m + n + o + p
+      }
+      val v = C(6, k = 5).a(60, o = 50)
+    }
+
+    val o1v = o1.C(6, k = 5).a(60, o = 50)
+
+    @TyperTester.retyperAll object o2 {
+      case class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {
+        def a(m: Int, n: Int = 70, o: Int = 80, p: Int = 90) =
+          i + j + k + l + m + n + o + p
+      }
+      val v = C(6, k = 5).a(60, o = 50)
+    }
+
+    val o2v = o2.C(6, k = 5).a(60, o = 50)
+
+    v1 should be (297)
+    v2 should be (297)
+    o1v should be (297)
+    o2v should be (297)
+    o1.v should be (297)
+    o2.v should be (297)
+  }
+
   it should "correctly compile auxiliaries and default arguments" in {
     val v1 = TyperTester.retyper {
       class C(i: Int, j: Int = 7, k: Int = 8, l: Int = 9) {

@@ -999,7 +999,31 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
             tpname.toTermName
         }).toSet
 
-        symbols ++= (trees collect {
+        val companions = (trees collect {
+          case ModuleDef(_, name, _) if names contains name =>
+            name.toTypeName
+        }).toSet
+
+        val havingCompanions = (trees collect {
+          case classDef @ ClassDef(_, tpname, _, _) if companions contains tpname =>
+            tpname -> classDef
+        }).toMap
+
+        val reorderedTrees =
+          trees flatMap {
+            case tree @ ClassDef(_, tpname, _, _) =>
+              havingCompanions get tpname map { _ =>
+                Seq.empty
+              } getOrElse Seq(tree)
+            case tree @ ModuleDef(_, name, _) =>
+              havingCompanions get name.toTypeName map { classDef =>
+                Seq(tree, classDef)
+              } getOrElse Seq(tree)
+            case tree =>
+              Seq(tree)
+          }
+
+        symbols ++= (reorderedTrees collect {
           case tree @ ClassDef(mods, _, _, _)
               if tree.symbol != NoSymbol &&
                  (mods hasFlag CASE) =>
@@ -1010,15 +1034,12 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
             Seq(tree.symbol, tree.symbol.asModule.moduleClass)
         }).flatten
 
-        trees map {
-          case tree @ ModuleDef(mods, name, _) if names contains name =>
-            if (mods hasFlag SYNTHETIC)
-              EmptyTree
-            else
-              resetCaseImplDef(tree)
-          case tree @ ModuleDef(mods, _, _) if mods hasFlag CASE =>
+        reorderedTrees map {
+          case tree @ ModuleDef(mods, name, _)
+              if (mods hasFlag CASE) || (names contains name) =>
             resetCaseImplDef(tree)
-          case tree @ ClassDef(mods, _, _, _) if mods hasFlag CASE =>
+          case tree @ ClassDef(mods, _, _, _)
+              if mods hasFlag CASE =>
             resetCaseImplDef(tree)
           case tree =>
             tree
@@ -1056,14 +1077,12 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
         owner foreach { owners += _ }
 
         val result = tree match {
-          case _
-              if internal.attachments(tree).contains[CaseClassMarker.type] =>
+          case _ if internal.attachments(tree).contains[CaseClassMarker.type] =>
             internal.removeAttachment[CaseClassMarker.type](tree)
             tree
           case tree: TypeTree if symbolsContains(tree.symbol) =>
             createTypeTree(tree.tpe, tree.pos, owners)
-          case _
-              if symbolsContains(tree.symbol) =>
+          case _ if symbolsContains(tree.symbol) =>
             super.transform(internal.setSymbol(tree, NoSymbol))
           case _ =>
             super.transform(tree)
