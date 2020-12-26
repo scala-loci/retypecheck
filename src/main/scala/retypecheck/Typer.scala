@@ -1111,8 +1111,7 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
         }
         map { symbol =>
           val typeSymbol = symbol.asType
-          val members = typeSymbol.toType.members
-          val names = (members map { _.name }).toSet[Name]
+          val names = (typeSymbol.toType.members map { _.name }).toSet[Name]
           Left((symbol, typeSymbol.name, names, None))
         })
 
@@ -1131,7 +1130,7 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
           else
             implDef.symbol
 
-        val names =
+        val declNames =
           (implDef.impl.parents flatMap { parent =>
             if (parent.symbol != null && parent.symbol.isType)
               parent.symbol.asType.toType.members map { _.name }
@@ -1142,13 +1141,22 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
             case defTree: DefTree => defTree.name
           })
 
+        val memberNames =
+          if (symbol.isType)
+            (symbol.asType.toType.members map { _.name }).toSet[Name]
+          else
+            Set.empty
+
+        val names = declNames.toSet ++ memberNames
+
         val self =
-          if (implDef.impl.self.name != termNames.EMPTY)
+          if (implDef.impl.self.name != termNames.EMPTY &&
+              implDef.impl.self.name != termNames.WILDCARD)
             Some(implDef.impl.self)
           else
             None
 
-        stack.prepend(Left((symbol, implDef.name.toTypeName, names.toSet, self)))
+        stack.prepend(Left((symbol, implDef.name.toTypeName, names, self)))
 
         val result = super.transform(implDef)
 
