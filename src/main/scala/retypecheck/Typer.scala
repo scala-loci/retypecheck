@@ -108,14 +108,18 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
    *
    * This method eliminates some problematic cases.
    */
-  def cleanModifiers(mods: Modifiers): Modifiers = {
-    val possibleFlags = Seq(ABSTRACT, ARTIFACT, BYNAMEPARAM, CASE, CASEACCESSOR,
-      CONTRAVARIANT, COVARIANT, DEFAULTINIT, DEFAULTPARAM, DEFERRED, FINAL,
-      IMPLICIT, LAZY, LOCAL, MACRO, MUTABLE, OVERRIDE, PARAM, PARAMACCESSOR,
-      PRESUPER, PRIVATE, PROTECTED, SEALED, SYNTHETIC)
+  def cleanModifiers(mods: Modifiers, removeFlags: FlagSet = NoFlags): Modifiers = {
+    val possibleFlags = Seq(ABSOVERRIDE, ABSTRACT, ARTIFACT, BYNAMEPARAM,
+      CASE, CASEACCESSOR, CONTRAVARIANT, COVARIANT, DEFAULTINIT, DEFAULTPARAM,
+      DEFERRED, FINAL, IMPLICIT, INTERFACE, LAZY, LOCAL, MACRO, MUTABLE,
+      OVERRIDE, PARAM, PARAMACCESSOR, PRESUPER, PRIVATE, PROTECTED,
+      SEALED, STABLE, SYNTHETIC, TRAIT)
 
-    val flags = possibleFlags.fold(NoFlags) { (flags, flag) =>
-      if (mods hasFlag flag) flags | flag else flags
+    val flags = possibleFlags.foldLeft(NoFlags) { (flags, flag) =>
+      if ((removeFlags != (removeFlags | flag)) && (mods hasFlag flag))
+        flags | flag
+      else
+        flags
     }
 
     Modifiers(flags, mods.privateWithin, mods.annotations)
@@ -1387,7 +1391,7 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
     object typecheckFixer extends Transformer {
       def fixModifiers(mods: Modifiers, symbol: Symbol,
           annotations: List[Annotation] = List.empty): Modifiers = {
-        val flags = cleanModifiers(mods).flags
+        val flags = cleanModifiers(mods, removeFlags = INTERFACE).flags
 
         val allAnnotations =
           (mods.annotations ++
@@ -1400,6 +1404,8 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
               else
                 transformedTree :: all
             }.reverse
+
+        internal.setFlag(symbol, flags)
 
         Modifiers(flags, mods.privateWithin, allAnnotations)
       }
