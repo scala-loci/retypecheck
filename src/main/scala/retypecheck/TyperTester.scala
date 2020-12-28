@@ -110,8 +110,14 @@ object TyperTester {
         val file = url.getFile
         val index = file indexOf "/scala-library-"
         val start = index + 15
-        val end = index + 19
-        index != -1 && end <= file.length && (file.substring(start, end) == "2.13")
+        val end = index + 22
+        val version =
+          if (index != -1 && end <= file.length)
+            file.substring(start, end)
+          else
+            ""
+        version == "2.13.0." || version == "2.13.0-" ||
+        version == "2.13.1." || version == "2.13.1-"
       }
 
     code.tree match {

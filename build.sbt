@@ -1,16 +1,16 @@
 enablePlugins(GitVersioning)
 
-git.useGitDescribe in ThisBuild := true
+ThisBuild / git.useGitDescribe := true
 
-name in ThisBuild := "retypecheck"
+ThisBuild / name := "retypecheck"
 
-scalaVersion in ThisBuild := "2.13.1"
+ThisBuild / organization := "de.tuda.stg"
 
-organization in ThisBuild := "de.tuda.stg"
+ThisBuild / licenses += "Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")
 
-licenses in ThisBuild += "Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")
+ThisBuild / scalacOptions ++= Seq("-feature", "-deprecation", "-unchecked", "-Xlint")
 
-scalacOptions in ThisBuild ++= Seq("-feature", "-deprecation", "-unchecked", "-Xlint")
+ThisBuild / scalaVersion := "2.13.4"
 
 
 def checkVersion(version: String)(check: PartialFunction[(Long, Long, Long), Boolean]) = {
@@ -42,12 +42,15 @@ val dependencies = libraryDependencies ++= Seq(
 
 val dependenciesTest = libraryDependencies ++= Seq(
   "com.chuusai" %% "shapeless" % "2.3.3" % Test,
-  "org.parboiled" %% "parboiled" % "2.1.8",
+  if (`is 2.12+`(scalaVersion.value))
+    "org.parboiled" %% "parboiled" % "2.2.1" % Test
+  else
+    "org.parboiled" %% "parboiled" % "2.1.8" % Test,
   if (`is 2.12+`(scalaVersion.value))
     "org.scala-lang.modules" %% "scala-async" % "0.10.0" % Test
   else
     "org.scala-lang.modules" %% "scala-async" % "0.9.7" % Test,
-  "org.scalatest" %% "scalatest" % "3.1.1" % Test)
+  "org.scalatest" %% "scalatest" % "3.2.3" % Test)
 
 val macroAnnotation = Seq(
   scalacOptions ++= {
@@ -65,30 +68,30 @@ val macroAnnotation = Seq(
       Seq(compilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.patch))
   })
 
-val base = baseDirectory in ThisBuild
+val base = ThisBuild / baseDirectory
 
 
 def projectWithBaseSrc(project: Project) = project settings (
-  unmanagedSourceDirectories in Compile ++= {
+  Compile / unmanagedSourceDirectories ++= {
     if (`is 2.13.2+`(scalaVersion.value))
       Seq(base.value / "src" / "main" / "scala-2.13.2+")
     else
       Seq(base.value / "src" / "main" / "scala-2.13.1-")
   },
-  unmanagedSourceDirectories in Compile += base.value / "src" / "main" / "scala",
-  unmanagedResourceDirectories in Compile += base.value / "src" / "main" / "resources",
-  unmanagedSourceDirectories in Test ++= {
+  Compile / unmanagedSourceDirectories += base.value / "src" / "main" / "scala",
+  Compile / unmanagedResourceDirectories += base.value / "src" / "main" / "resources",
+  Test / unmanagedSourceDirectories ++= {
     if (`is 2.13.2+`(scalaVersion.value))
       Seq(base.value / "src" / "test" / "scala-2.13.2+")
     else
       Seq(base.value / "src" / "test" / "scala-2.13.1-")
   },
-  unmanagedSourceDirectories in Test += base.value / "src" / "test" / "scala",
-  unmanagedResourceDirectories in Test += base.value / "src" / "test" / "resources")
+  Test / unmanagedSourceDirectories += base.value / "src" / "test" / "scala",
+  Test / unmanagedResourceDirectories += base.value / "src" / "test" / "resources")
 
 def mainProject(project: Project) = projectWithBaseSrc(project) settings (
   scalaVersion := "2.13.1",
-  crossScalaVersions := Seq("2.11.12", "2.12.11", "2.13.1"),
+  crossScalaVersions := Seq("2.11.12", "2.12.12", "2.13.4"),
   dependencies)
 
 def testProject(project: Project) = projectWithBaseSrc(project) settings (
@@ -96,8 +99,8 @@ def testProject(project: Project) = projectWithBaseSrc(project) settings (
   scalaVersion := "2.13.1",
   crossScalaVersions := Seq(
     "2.11.6", "2.11.7", "2.11.8", "2.11.9", "2.11.10", "2.11.11", "2.11.12",
-    "2.12.0", "2.12.1", "2.12.2", "2.12.3", "2.12.4", "2.12.5", "2.12.6", "2.12.7", "2.12.8", "2.12.9", "2.12.10", "2.12.11",
-    "2.13.0", "2.13.1", "2.13.2"),
+    "2.12.0", "2.12.1", "2.12.2", "2.12.3", "2.12.4", "2.12.5", "2.12.6", "2.12.7", "2.12.8", "2.12.9", "2.12.10", "2.12.11", "2.12.12",
+    "2.13.0", "2.13.1", "2.13.2", "2.13.3", "2.13.4"),
   dependencies,
   dependenciesTest)
 
@@ -105,25 +108,19 @@ def testProject(project: Project) = projectWithBaseSrc(project) settings (
 lazy val retypecheck = (project in file(".")
   settings (
     skip in publish := true,
-    unmanagedSourceDirectories in Compile := Seq.empty,
-    unmanagedResourceDirectories in Compile := Seq.empty,
-    unmanagedSourceDirectories in Test := Seq.empty,
-    unmanagedResourceDirectories in Test := Seq.empty)
+    Compile / unmanagedSourceDirectories := Seq.empty,
+    Compile / unmanagedResourceDirectories := Seq.empty,
+    Test / unmanagedSourceDirectories := Seq.empty,
+    Test / unmanagedResourceDirectories := Seq.empty)
   aggregate (main, testMacro, testMacroAnnotation))
 
 lazy val main = (mainProject(project) in file(".main")
   settings (
     normalizedName := "retypecheck",
-    excludeFilter in unmanagedSources in Compile := "TyperTester.scala",
-    excludeFilter in unmanagedSources in Test := "*"))
+    Compile / unmanagedSources / excludeFilter := "TyperTester.scala",
+    Test / unmanagedSources / excludeFilter := "*"))
 
 lazy val testMacro = (testProject(project) in file(".test-macro"))
 
 lazy val testMacroAnnotation = (testProject(project) in file(".test-macro-annotation")
   settings (macroAnnotation))
-
-
-test in Test := {
-  (test in Test in testMacro).value
-  (test in Test in testMacroAnnotation).value
-}
