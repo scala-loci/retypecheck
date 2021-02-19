@@ -1765,7 +1765,10 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
         case Select(_, _) if hasImports =>
           def traversePath(tree: Tree, found: Boolean): Unit = tree match {
             case Select(qualifier, name) =>
-              if (!found && tree.pos == qualifier.pos) {
+              if (!found &&
+                  tree.pos != NoPosition &&
+                  qualifier.pos != NoPosition &&
+                  tree.pos.point == qualifier.pos.point) {
                 if (tree.symbol != NoSymbol)
                   maskImports(tree.symbol)
 
