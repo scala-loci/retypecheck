@@ -92,9 +92,10 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
     fixUntypecheck(
       c resetAllAttrs
         (selfReferenceFixer transform
-          fixTypesAndSymbols(
-            fixCaseClasses(
-              fixTypecheck(tree)))))
+          maskUnusedImports(
+            fixTypesAndSymbols(
+              fixCaseClasses(
+                fixTypecheck(tree))))))
 
   /**
    * Cleans the flag set of the given modifiers.
