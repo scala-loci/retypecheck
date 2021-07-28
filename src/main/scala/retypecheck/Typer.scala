@@ -142,6 +142,8 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
 
   def createTypeTree(tpe: Type, pos: Position,
       owners: collection.Set[Symbol]): Tree = {
+    val singleton = typeOf[Singleton]
+
     val allOwners = ownerChain(c.internal.enclosingOwner).toSet union owners
 
     def expandPrefix(pre: Type, sym: Symbol) =
@@ -251,27 +253,79 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
             if (hi =:= definitions.AnyTpe) EmptyTree else expandType(hi))
 
         case ExistentialType(quantified, underlying) =>
+          val singletons = mutable.Map.empty[String, TermName]
+
           val whereClauses = quantified map { quantified =>
             quantified.typeSignature match {
               case TypeBounds(_, _) =>
                 val mods = Modifiers(
                   DEFERRED | (if (quantified.isSynthetic) SYNTHETIC else NoFlags))
 
-                Some(TypeDef(
-                  mods,
-                  quantified.name.toTypeName,
-                  List.empty,
-                  expandType(quantified.typeSignature)))
+                val name = quantified.name.toString
+
+                val valueType =
+                  quantified.typeSignature match {
+                    case TypeBounds(definitions.NothingTpe, RefinedType(parents, scope))
+                        if name endsWith ".type" =>
+                      
+                      val (singletonType, types) = parents partition { _ =:= singleton }
+
+                      if (singletonType.nonEmpty && types.nonEmpty) {
+                        if (types.size > 1 || scope.nonEmpty)
+                          Some(internal.refinedType(types, scope))
+                        else
+                          Some(types.head)
+                      }
+                      else
+                        None
+                    case _ =>
+                      None
+                  }
+
+                if (valueType.nonEmpty) {
+                  val termName = TermName(name.substring(0, name.length - 5))
+                  singletons += name -> termName
+
+                  Some(ValDef(
+                    mods,
+                    termName,
+                    expandType(valueType.get),
+                    EmptyTree))
+                }
+                else
+                  Some(TypeDef(
+                    mods,
+                    quantified.name.toTypeName,
+                    List.empty,
+                    expandType(quantified.typeSignature)))
 
               case _ =>
                 None
             }
           }
 
-          if (whereClauses exists { _.isEmpty })
-            TypeTree(tpe)
+          if (whereClauses forall { _.nonEmpty }) {
+            object singletonReferenceFixer extends Transformer {
+              override def transform(tree: Tree) = tree match {
+                case Ident(name) =>
+                  (singletons get name.toString
+                    map { name => SingletonTypeTree(Ident(name)) }
+                    getOrElse tree)
+                case Select(Ident(name), selectedName) =>
+                  (singletons get name.toString
+                    map { name => Select(Ident(name), selectedName).withAttrs(
+                      tree.symbol, tree.tpe, tree.pos) }
+                    getOrElse tree)
+                case _ =>
+                  super.transform(tree)
+              }
+            }
+
+            singletonReferenceFixer transform
+              ExistentialTypeTree(expandType(underlying), whereClauses.flatten)
+          }
           else
-            ExistentialTypeTree(expandType(underlying), whereClauses.flatten)
+            TypeTree(tpe)
 
         case ClassInfoType(parents, decls, typeSymbol) =>
           val publicDecls = internal.newScopeWith(decls.toSeq filter { symbol =>

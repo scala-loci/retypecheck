@@ -36,5 +36,12 @@ class TyperTypeTreeCreationSpec extends AnyFlatSpec with Matchers {
       "_root_.scala.Tuple2[T, T] forSome { type T <: TyperTypeTreeCreationSpec.this.Test }")
     TyperTester.createTypeTree[(T, T) forSome { type T <: Test#Type { type T } }] should be (
       "_root_.scala.Tuple2[T, T] forSome { type T <: TyperTypeTreeCreationSpec.this.Test#Type { type T } }")
+
+    TyperTester.createTypeTree[(v.type, v.type) forSome { val v: AnyRef }] should be (
+      "_root_.scala.Tuple2[v.type, v.type] forSome { val v: _root_.scala.AnyRef }")
+    TyperTester.createTypeTree[(v.type, v.type) forSome { val v: Test }] should be (
+      "_root_.scala.Tuple2[v.type, v.type] forSome { val v: TyperTypeTreeCreationSpec.this.Test }")
+    TyperTester.createTypeTree[(v.type, v.type) forSome { val v: Test { type T } }] should be (
+      "_root_.scala.Tuple2[v.type, v.type] forSome { val v: TyperTypeTreeCreationSpec.this.Test { type T } }")
   }
 }
