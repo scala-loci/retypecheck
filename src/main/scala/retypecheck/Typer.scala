@@ -177,12 +177,14 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
             if (preSymbol.isModuleClass) {
               val symbol = preSymbol.asClass.module
               val owner = symbol.owner
-              val sym =
-                if (symbol.name == termNames.PACKAGE && owner.isModuleClass)
-                  owner.asClass.module
-                else
-                  symbol
-              tree.withAttrs(sym, sym.typeSignature, pos)
+              if (symbol.name == termNames.PACKAGE && owner.isModuleClass) {
+                val symbol = owner.asClass.module
+                tree.withAttrs(symbol, symbol.typeSignature, pos)
+              }
+              else if (preSymbol == preSymbolSingle)
+                tree.withAttrs(symbol, symbol.typeSignature, pos)
+              else
+                tree.withAttrs(preSymbolSingle, pre, pos)
             }
             else
               tree.withAttrs(preSymbolSingle, pre, pos)
