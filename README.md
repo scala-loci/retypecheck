@@ -1,5 +1,11 @@
 # retypecheck
 
+
+[![Build](https://img.shields.io/github/workflow/status/scala-loci/retypecheck/build?label=build&logo=GitHub&logoColor=lightgray&style=for-the-badge)](https://github.com/scala-loci/retypecheck/actions/workflows/build.yml)
+[![License](https://img.shields.io/github/license/scala-loci/retypecheck?label=license&logo=Open%20Source%20Initiative&logoColor=silver&style=for-the-badge)](https://github.com/scala-loci/retypecheck/blob/master/LICENSE)
+[![Release](https://img.shields.io/maven-central/v/io.github.scala-loci/retypecheck_2.13?label=release&logo=Apache%20Maven&logoColor=lightgray&color=blue&style=for-the-badge)](https://search.maven.org/search?q=g:io.github.scala-loci%20a:retypecheck*)
+
+
 The Scala type-checking process distorts certain ASTs (such as representations
 of extractors or case classes) in a way that they cannot be type-checked again.
 The issue is described in [SI-5464](http://issues.scala-lang.org/browse/SI-5464).
@@ -20,17 +26,11 @@ of the compiler's desugerings during type-checking.
 
 ## How-To
 
-1. Add the resolver to your `build.sbt`:
+Add the dependency to your `build.sbt`:
 
-   ```scala
-   resolvers += Resolver.bintrayRepo("stg-tud", "maven")
-   ```
-   
-2. Add the dependency to your `build.sbt`:
-
-   ```scala
-   libraryDependencies += "de.tuda.stg" %% "retypecheck" % "0.8.0"
-   ```
+```scala
+libraryDependencies += "io.github.scala-loci" %% "retypecheck" % "0.9.0"
+```
 
 ### Example Usage
 

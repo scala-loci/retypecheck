@@ -2,15 +2,15 @@ enablePlugins(GitVersioning)
 
 ThisBuild / git.useGitDescribe := true
 
-ThisBuild / name := "retypecheck"
+ThisBuild / organization := "io.github.scala-loci"
 
-ThisBuild / organization := "de.tuda.stg"
+ThisBuild / homepage := Some(url("https://github.com/scala-loci/retypecheck"))
 
-ThisBuild / licenses += "Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")
+ThisBuild / licenses += "Apache-2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0")
 
 ThisBuild / scalacOptions ++= Seq("-feature", "-deprecation", "-unchecked", "-Xlint")
 
-ThisBuild / scalaVersion := "2.13.4"
+ThisBuild / scalaVersion := "2.13.7"
 
 
 def checkVersion(version: String)(check: PartialFunction[(Long, Long, Long), Boolean]) = {
@@ -41,16 +41,16 @@ val dependencies = libraryDependencies ++= Seq(
   "org.scalamacros" %% "resetallattrs" % "1.0.0")
 
 val dependenciesTest = libraryDependencies ++= Seq(
-  "com.chuusai" %% "shapeless" % "2.3.3" % Test,
+  "com.chuusai" %% "shapeless" % "2.3.7" % Test,
   if (`is 2.12+`(scalaVersion.value))
-    "org.parboiled" %% "parboiled" % "2.2.1" % Test
+    "org.parboiled" %% "parboiled" % "2.3.0" % Test
   else
     "org.parboiled" %% "parboiled" % "2.1.8" % Test,
   if (`is 2.12+`(scalaVersion.value))
     "org.scala-lang.modules" %% "scala-async" % "0.10.0" % Test
   else
     "org.scala-lang.modules" %% "scala-async" % "0.9.7" % Test,
-  "org.scalatest" %% "scalatest" % "3.2.3" % Test)
+  "org.scalatest" %% "scalatest" % "3.2.10" % Test)
 
 val macroAnnotation = Seq(
   scalacOptions ++= {
@@ -90,17 +90,17 @@ def projectWithBaseSrc(project: Project) = project settings (
   Test / unmanagedResourceDirectories += base.value / "src" / "test" / "resources")
 
 def mainProject(project: Project) = projectWithBaseSrc(project) settings (
-  scalaVersion := "2.13.1",
-  crossScalaVersions := Seq("2.11.12", "2.12.12", "2.13.4"),
+  scalaVersion := "2.13.7",
+  crossScalaVersions := Seq("2.11.12", "2.12.15", "2.13.7"),
   dependencies)
 
 def testProject(project: Project) = projectWithBaseSrc(project) settings (
   skip in publish := true,
-  scalaVersion := "2.13.1",
+  scalaVersion := "2.13.7",
   crossScalaVersions := Seq(
     "2.11.6", "2.11.7", "2.11.8", "2.11.9", "2.11.10", "2.11.11", "2.11.12",
-    "2.12.0", "2.12.1", "2.12.2", "2.12.3", "2.12.4", "2.12.5", "2.12.6", "2.12.7", "2.12.8", "2.12.9", "2.12.10", "2.12.11", "2.12.12",
-    "2.13.0", "2.13.1", "2.13.2", "2.13.3", "2.13.4"),
+    "2.12.0", "2.12.1", "2.12.2", "2.12.3", "2.12.4", "2.12.5", "2.12.6", "2.12.7", "2.12.8", "2.12.9", "2.12.10", "2.12.11", "2.12.12", "2.12.13", "2.12.14", "2.12.15",
+    "2.13.0", "2.13.1", "2.13.2", "2.13.3", "2.13.4", "2.13.5", "2.13.6", "2.13.7"),
   dependencies,
   dependenciesTest)
 
@@ -116,7 +116,7 @@ lazy val retypecheck = (project in file(".")
 
 lazy val main = (mainProject(project) in file(".main")
   settings (
-    normalizedName := "retypecheck",
+    name := "retypecheck",
     Compile / unmanagedSources / excludeFilter := "TyperTester.scala",
     Test / unmanagedSources / excludeFilter := "*"))
 
