@@ -29,7 +29,7 @@ of the compiler's desugerings during type-checking.
 Add the dependency to your `build.sbt`:
 
 ```scala
-libraryDependencies += "io.github.scala-loci" %% "retypecheck" % "0.9.0"
+libraryDependencies += "io.github.scala-loci" %% "retypecheck" % "0.10.0"
 ```
 
 ### Example Usage
