@@ -1501,9 +1501,9 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
               object transformer extends Transformer {
                 override def transform(tree: Tree) = tree match {
                   case tree @ Ident(name: TermName) =>
-                    val defaultName = names.getOrElse(name -> tree.symbol, name)
-                    Ident(defaultName).withAttrs(
-                      tree.symbol, tree.tpe, tree.pos)
+                    names get (name -> tree.symbol) map { name =>
+                      Ident(name).withAttrs(tree.symbol, tree.tpe, tree.pos)
+                    } getOrElse tree
                   case tree =>
                     super.transform(tree)
                 }
@@ -1532,11 +1532,15 @@ class ReTyper[+C <: blackbox.Context](val c: C) {
           super.transform(Select(qualifier, macroName))
 
         case Ident(name) if tree.symbol.isTerm && name == tree.symbol.name =>
-          val expandedTree = expandSymbol(tree.symbol, tree.pos)
-          if (expandedTree exists { definedSymbols contains _.symbol })
-            tree
-          else
-            expandedTree
+          expandSymbol(tree.symbol, tree.pos) match {
+            case Ident(_) =>
+              tree
+            case expandedTree
+                if expandedTree exists { definedSymbols contains _.symbol } =>
+              tree
+            case expandedTree =>
+              expandedTree
+          }
 
         // fix renamed imports
         case Select(qual, _) if tree.symbol != NoSymbol =>
