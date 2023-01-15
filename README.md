@@ -1,7 +1,7 @@
 # retypecheck
 
 
-[![Build](https://img.shields.io/github/workflow/status/scala-loci/retypecheck/build?label=build&logo=GitHub&logoColor=lightgray&style=for-the-badge)](https://github.com/scala-loci/retypecheck/actions/workflows/build.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/scala-loci/retypecheck/build.yml?branch=master&label=build&logo=GitHub&logoColor=lightgray&style=for-the-badge)](https://github.com/scala-loci/retypecheck/actions/workflows/build.yml)
 [![License](https://img.shields.io/github/license/scala-loci/retypecheck?label=license&logo=Open%20Source%20Initiative&logoColor=silver&style=for-the-badge)](https://github.com/scala-loci/retypecheck/blob/master/LICENSE)
 [![Release](https://img.shields.io/maven-central/v/io.github.scala-loci/retypecheck_2.13?label=release&logo=Apache%20Maven&logoColor=lightgray&color=blue&style=for-the-badge)](https://search.maven.org/search?q=g:io.github.scala-loci%20a:retypecheck*)
 
